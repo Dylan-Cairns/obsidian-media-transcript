@@ -3,10 +3,20 @@
    ────────────────────────────────────────────── */
 
 .mt-view {
+  /* The plugin owns its accent instead of borrowing the theme's: transcript
+     highlighting should look the same whatever accent the vault is set to. */
+  --mt-accent: #8b5cf6;
+  --mt-accent-contrast: #fff;
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+}
+
+/* Lightened so the same violet stays legible on a dark background. */
+.theme-dark .mt-view {
+  --mt-accent: #a78bfa;
+  --mt-accent-contrast: #1c1524;
 }
 
 /* Root two-column layout */
@@ -40,7 +50,7 @@
 
 .mt-divider:hover,
 body.mt-resizing .mt-divider {
-  background: var(--interactive-accent);
+  background: var(--mt-accent);
 }
 
 body.mt-resizing {
@@ -277,13 +287,13 @@ video.mt-media {
 /* Matches inside a transcript line */
 .mt-hit {
   border-radius: 2px;
-  background: color-mix(in srgb, var(--text-accent) 26%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--mt-accent) 26%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mt-accent) 30%, transparent);
 }
 
 .mt-hit-current {
-  background: var(--text-accent);
-  color: var(--text-on-accent);
+  background: var(--mt-accent);
+  color: var(--mt-accent-contrast);
   box-shadow: none;
 }
 
@@ -329,8 +339,8 @@ video.mt-media {
 }
 
 .mt-segment.mt-active {
-  /* Podwise-style: subtle violet/accent at ~15% opacity, not a full fill */
-  background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+  /* Podwise-style: subtle violet at ~15% opacity, not a full fill */
+  background: color-mix(in srgb, var(--mt-accent) 15%, transparent);
 }
 
 /* Timestamp chip — small, but it is the one thing in a line you click. */
@@ -353,14 +363,14 @@ video.mt-media {
 /* Outline it rather than fill it: a solid accent block hides the time, which is
    exactly what you were aiming at. */
 .mt-ts:hover {
-  color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+  color: var(--mt-accent);
+  background: color-mix(in srgb, var(--mt-accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--mt-accent);
 }
 
 .mt-segment.mt-active .mt-ts {
-  color: var(--interactive-accent);
-  background: color-mix(in srgb, var(--interactive-accent) 20%, transparent);
+  color: var(--mt-accent);
+  background: color-mix(in srgb, var(--mt-accent) 20%, transparent);
 }
 
 /* Speaker chip (per-speaker color set inline) */
