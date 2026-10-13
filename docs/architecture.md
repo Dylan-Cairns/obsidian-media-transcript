@@ -147,6 +147,22 @@ MediaTranscriptView.onLoadFile()
     `[[x.m4a#t=83|1:23]]`。`#t=` 是 Obsidian 原生嵌入也认的媒体片段语法，卸了插件也能用。
     普通点击经包装后的 `workspace.openLinkText` 路由到旁边的字幕视图并 seek；
     带修饰键的点击保持原行为，视图在 `setEphemeralState` 里同样处理 `#t=`。
+- **媒体离开 vault 之后的笔记**（`embeds.ts`）：
+  - `![[x.m4a]]` 找不到文件时，Obsidian **不调用任何 embed 工厂**，阅读视图和 Live Preview
+    都只渲染同一个 `.internal-embed.mod-empty-attachment[src]`（「找不到…」）。所以用
+    `MutationObserver` 在 DOM 里找它：若 vault 里**任意位置**有同名字幕
+    （`findSubtitlesByBaseName` + 优先级），就地换成**字幕卡片**，`#t=` 照样生效；
+    没字幕就保持 Obsidian 原样。不改写笔记，老笔记自动可用。
+  - `![[x.vibevoice-4bit.json]]`：为 srt/vtt/json 注册 embed 工厂（仅当没人占用），渲染同样的卡片；
+    不是字幕的 json 只显示文件名。
+  - 卡片 = 标题 + 播放器（媒体走和字幕视图同一套查找：同目录 → 文件夹 → 远程）+ Transcript 按钮
+    （在旁边打开完整视图，交接播放位置）。宿主元素自带「找不到」的内边距/背景/居中，
+    `.mt-card-host` 把它们清掉。卡片内 mousedown/click 不冒泡：否则 Live Preview 会切回源码、
+    缺失文件的 embed 会提示创建文件。
+  - Obsidian 重开笔记时会**复用**已渲染的 embed，没找到媒体的卡片（服务器睡了）不会自己刷新，
+    所以「No audio/video found」后面带 **Retry**。
+  - 卡片被移出页面时，其播放器要停掉（脱离 DOM 的 `<audio>` 会继续响）：每批 DOM 变动后回收。
+  - 链接 `[[x.m4a#t=83]]` 找不到文件时，直接落到 Obsidian 会提示**新建** x.m4a；改为按名字找字幕打开。
 - **扩展名接管**：`main.ts` 逐个 `registerExtensions`，被其他插件占用时先
   `unregisterExtensions` 再接管，避免冲突导致加载失败。
 

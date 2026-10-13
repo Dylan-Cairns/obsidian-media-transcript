@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePriority, type FoundSubtitleFile } from '../src/utils/subtitleFinder';
+import { findSubtitlesByBaseName, resolvePriority, type FoundSubtitleFile } from '../src/utils/subtitleFinder';
 import type { SubtitlePriority } from '../src/settings';
 
 const track = (marker: string, extension: string): FoundSubtitleFile =>
@@ -52,5 +52,30 @@ describe('resolvePriority', () => {
 
   it('has nothing to do for a recording with no subtitles', () => {
     expect(resolvePriority([], prefer('whisper'))).toEqual([]);
+  });
+});
+
+describe('findSubtitlesByBaseName', () => {
+  const file = (path: string) => {
+    const name = path.split('/').pop()!;
+    return { path, name, extension: name.split('.').pop()! } as never;
+  };
+  const vault = {
+    getFiles: () => [
+      file('附件/talk.vibevoice-4bit.json'),
+      file('Daily/talk.srt'),
+      file('附件/talk.m4a'),
+      file('附件/talk2.srt'),
+      file('附件/talk.vibevoice-4bit.txt'),
+    ],
+  } as never;
+
+  it('finds tracks named after the media in any folder', () => {
+    const found = findSubtitlesByBaseName('talk', vault).map(f => `${f.marker}|${f.extension}`);
+    expect(found).toEqual(['vibevoice-4bit|json', '|srt']);
+  });
+
+  it('does not match a longer name that merely starts the same', () => {
+    expect(findSubtitlesByBaseName('tal', vault)).toEqual([]);
   });
 });

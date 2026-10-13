@@ -1,4 +1,5 @@
 import { App, Component, Plugin, TFile, WorkspaceLeaf, parseLinktext, setIcon } from 'obsidian';
+import { EmbedCreator, TranscriptCards, embedRegistry } from './embeds';
 import { MediaTranscriptView, VIEW_TYPE_MEDIA_TRANSCRIPT } from './MediaTranscriptView';
 import { MediaTranscriptSettingTab, DEFAULT_SETTINGS } from './settings';
 import type { MediaTranscriptSettings } from './settings';
@@ -27,24 +28,14 @@ function viewRegistry(app: App): ViewRegistry {
 }
 
 // `![[talk.m4a]]` doesn't go through the view registry at all — embeds have
-// their own registry (extension → component factory), so taking over the
-// extension above never reached them. We wrap the core factory rather than
-// replace it: the native player stays, we only add a "Transcript" button.
-// Undocumented too; every access is guarded so a change degrades to "no button".
-interface EmbedContext { containerEl: HTMLElement }
-type EmbedCreator = (ctx: EmbedContext, file: TFile, subpath?: string) => Component;
-interface EmbedRegistry {
-  embedByExtension: Record<string, EmbedCreator | undefined>;
-  registerExtension(ext: string, creator: EmbedCreator): void;
-  unregisterExtension(ext: string): void;
-}
-function embedRegistry(app: App): EmbedRegistry | null {
-  return (app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry ?? null;
-}
+// their own registry (see embeds.ts), so taking over the extension above never
+// reached them. We wrap the core factory rather than replace it: the native
+// player stays, we only add a "Transcript" button.
 
 export default class MediaTranscriptPlugin extends Plugin {
   settings!: MediaTranscriptSettings;
   mediaLocator!: MediaLocator;
+  private cards!: TranscriptCards;
   // Core embed factories we wrapped, by extension, to put back on unload.
   private wrappedEmbeds = new Map<string, { original: EmbedCreator; wrapper: EmbedCreator }>();
 
@@ -131,6 +122,8 @@ export default class MediaTranscriptPlugin extends Plugin {
     });
 
     this.wrapMediaEmbeds();
+    this.cards = new TranscriptCards(this);
+    this.app.workspace.onLayoutReady(() => this.cards.start());
     this.routeMediaLinks();
 
     this.addSettingTab(new MediaTranscriptSettingTab(this.app, this));
@@ -265,6 +258,13 @@ export default class MediaTranscriptPlugin extends Plugin {
           await this.openTranscript(file, parseTimeFragment(subpath));
           return;
         }
+        // Media that has left the vault: its transcript is what's still here.
+        // Falling through would have Obsidian offer to create the missing file.
+        const transcript = !file && this.cards.isMediaName(path) ? this.cards.transcriptFor(path) : null;
+        if (transcript) {
+          await this.openTranscript(transcript, parseTimeFragment(subpath));
+          return;
+        }
       }
       return original.call(ws, linktext, sourcePath, newLeaf, openViewState);
     };
@@ -277,6 +277,7 @@ export default class MediaTranscriptPlugin extends Plugin {
 
   onunload() {
     this.unwrapMediaEmbeds();
+    this.cards?.stop();
     // Release the extensions we took over (they stay registered otherwise).
     try {
       viewRegistry(this.app).unregisterExtensions([

@@ -68,6 +68,25 @@ export function findSubtitleTracks(
 }
 
 /**
+ * The subtitle tracks named after `baseName` anywhere in the vault — for media
+ * that has left the vault, where only its name (from a link or an embed)
+ * remains to go on. Use resolvePriority to pick one.
+ */
+export function findSubtitlesByBaseName(baseName: string, vault: Vault): FoundSubtitleFile[] {
+  const pattern = new RegExp(
+    `^${escapeRegex(baseName)}(?:\\.([^.]+))?\\.(?:${SUBTITLE_EXTENSIONS.join('|')})$`,
+  );
+  const results: FoundSubtitleFile[] = [];
+  for (const file of vault.getFiles()) {
+    const match = file.name.match(pattern);
+    if (!match) continue;
+    const ext = file.extension.toLowerCase();
+    if (SUBTITLE_EXTENSIONS.includes(ext)) results.push({ file, marker: match[1] ?? '', extension: ext });
+  }
+  return results;
+}
+
+/**
  * Sort a media file's subtitle files into the order they should be preferred.
  *
  * The first entry is what opens by default, so this decides which
