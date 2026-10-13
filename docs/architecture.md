@@ -49,6 +49,28 @@ MediaTranscriptView.onLoadFile()
 
 若同目录没有对应字幕 → 显示"未找到字幕"提示，不做其它动作。
 
+## 找媒体（以字幕为锚）
+
+打开字幕文件时，字幕是锚点，媒体可以在任何地方。`MediaLocator.resolveForSubtitle()` 按顺序找：
+
+1. 字幕**同目录**
+2. 设置里的 **Media folders**（每行一个，按顺序，含子文件夹）：
+   - vault 内路径：在 `vault.getFiles()` 里按前缀过滤
+   - 绝对路径（外接盘、iCloud Drive 文件夹）：**仅桌面**，用 Node `fs` 递归列一遍并缓存；
+     没命中且缓存超过 30s 才重扫，免得「本来就没媒体」的字幕每次都去扫 2T 的盘。
+     播放地址是 `Platform.resourcePathPrefix` + 绝对路径。iCloud 被驱逐文件的
+     `.name.icloud` 占位按真实文件名入索引，读取时由系统下载。
+
+配对只看**文件名**（`utils/mediaMatch.ts`，纯函数有单测）：字幕名的每个点分前缀都是候选，
+视频优先于音频，再按设置里的扩展名顺序。
+
+**都找不到 → 只读模式**（`mt-reading-mode`），不再报错：字幕照常显示、搜索、复制、导出，
+顶栏写「No audio/video found · reading only」，悬停列出查过哪些地方（盘没插、路径写错一眼可见）。
+时间戳不可播放；`#t=` 链接改为高亮并居中那一句。
+
+媒体不在 vault 里时没法链接它，所以时间戳链接改为指向**字幕文件**（`[[x.json#t=83|1:23]]`），
+笔记里点它同样在旁边打开并定位。
+
 ## 布局与交互
 
 - **视频**：播放器在左（填满栏宽、`max-height:75vh`、吸顶），字幕在右；中间
@@ -95,6 +117,16 @@ MediaTranscriptView.onLoadFile()
   按**目标元素**分开比按「有没有选区」猜要可靠。
 - **交互**：右键 → 菜单（从此处播放 / 复制时间戳 / 复制文字）；
   点左侧时间块 → 复制时间戳；hover 仅高亮，不弹按钮（不影响布局）。
+- **笔记里的嵌入 / 链接**：`registerExtensions` 只管「打开文件」，`![[x.m4a]]`
+  走的是另一套 `embedRegistry`，所以以前嵌入处完全没有插件的入口。
+  - 嵌入：包一层 core 的 embed 工厂（不替换），有字幕时在原生播放器后加
+    「Transcript」按钮；没字幕保持原样。点按钮把内联播放器的位置/播放状态交给字幕视图并暂停内联。
+  - 打开位置：`openTranscript()` 一律开在**笔记旁边**（右侧分屏），复用已开的字幕面板，
+    不替换正在写的笔记。
+  - 时间戳链接：右键「Copy timestamp link」/ 命令 `insert-timestamp-link` 生成
+    `[[x.m4a#t=83|1:23]]`。`#t=` 是 Obsidian 原生嵌入也认的媒体片段语法，卸了插件也能用。
+    普通点击经包装后的 `workspace.openLinkText` 路由到旁边的字幕视图并 seek；
+    带修饰键的点击保持原行为，视图在 `setEphemeralState` 里同样处理 `#t=`。
 - **扩展名接管**：`main.ts` 逐个 `registerExtensions`，被其他插件占用时先
   `unregisterExtensions` 再接管，避免冲突导致加载失败。
 

@@ -1,5 +1,6 @@
 import { TFile, Vault } from 'obsidian';
 import type { MediaTranscriptSettings, SubtitlePriority } from '../settings';
+import { pickMedia, subtitleBaseCandidates } from './mediaMatch';
 
 export interface FoundSubtitleFile {
   file: TFile;
@@ -28,10 +29,20 @@ export function findSubtitleFiles(
   vault: Vault,
   settings: MediaTranscriptSettings,
 ): FoundSubtitleFile[] {
-  const baseName = mediaFile.basename; // filename without extension
-  const mediaDir = mediaFile.parent?.path ?? '';
-  const searchDir = settings.subtitleDirectory.trim() || mediaDir;
+  const searchDir = settings.subtitleDirectory.trim() || (mediaFile.parent?.path ?? '');
+  return findSubtitleTracks(mediaFile.basename, searchDir, vault);
+}
 
+/**
+ * The subtitle tracks named after `baseName` in `dir`. Split out from
+ * findSubtitleFiles because a transcript no longer needs its media to be a
+ * vault file — or to exist at all — to find its sibling tracks.
+ */
+export function findSubtitleTracks(
+  baseName: string,
+  dir: string,
+  vault: Vault,
+): FoundSubtitleFile[] {
   // Regex matches both:
   //   "video.srt"          → group 1 = undefined
   //   "video.whisper.srt"  → group 1 = "whisper"
@@ -42,8 +53,7 @@ export function findSubtitleFiles(
   const results: FoundSubtitleFile[] = [];
 
   for (const file of vault.getFiles()) {
-    const dir = file.parent?.path ?? '';
-    if (dir !== searchDir) continue;
+    if ((file.parent?.path ?? '') !== dir) continue;
 
     const match = file.name.match(pattern);
     if (!match) continue;
@@ -51,8 +61,7 @@ export function findSubtitleFiles(
     const ext = file.extension.toLowerCase();
     if (!SUBTITLE_EXTENSIONS.includes(ext)) continue;
 
-    const marker = match[1] ?? '';
-    results.push({ file, marker, extension: ext });
+    results.push({ file, marker: match[1] ?? '', extension: ext });
   }
 
   return results;
@@ -96,21 +105,12 @@ export function resolvePriority(
 }
 
 /**
- * Reverse lookup: given a subtitle file, find the media file it belongs to.
+ * Reverse lookup: given a subtitle file, find the media next to it.
  *
- * This mirrors the naming convention used by findSubtitleFiles, but backwards:
- *   [baseName].[ext]          (subtitle) → media basename = baseName
- *   [baseName].[marker].[ext] (subtitle) → media basename = baseName
- * Since the [marker] is arbitrary, we try every prefix of the subtitle's
- * name as a candidate media basename (longest first), e.g.
- *   "lecture.whisper.json" → candidates: "lecture.whisper", "lecture".
- *
- * Search directory: the subtitle file's own folder (media normally sits next
- * to its subtitles).
- *
- * Preference: video before audio, then by the extension order configured in
- * settings — so an .mp4 wins over an .m4a for the same basename.
- * Returns null if no matching media file exists.
+ * Every dotted prefix of the subtitle's name is a candidate media basename
+ * (the [marker] is arbitrary), and video wins over audio — see mediaMatch.ts.
+ * Only the subtitle's own folder is searched here; the configured media
+ * folders are MediaLocator's job. Returns null if nothing matches.
  */
 export function findMediaForSubtitle(
   subtitleFile: TFile,
@@ -118,48 +118,15 @@ export function findMediaForSubtitle(
   settings: MediaTranscriptSettings,
 ): TFile | null {
   const dir = subtitleFile.parent?.path ?? '';
-
-  // Strip the subtitle extension, then build candidate media basenames from
-  // every dotted prefix (so an arbitrary [marker] segment is peeled off).
-  const withoutExt = subtitleFile.name.slice(
-    0,
-    subtitleFile.name.length - subtitleFile.extension.length - 1,
+  const siblings = vault.getFiles()
+    .filter(f => (f.parent?.path ?? '') === dir)
+    .map(f => ({ basename: f.basename, extension: f.extension, ref: f }));
+  return pickMedia(
+    subtitleBaseCandidates(subtitleFile.name),
+    siblings,
+    settings.supportedVideoExtensions,
+    settings.supportedAudioExtensions,
   );
-  const parts = withoutExt.split('.');
-  const candidates = new Set<string>();
-  for (let k = parts.length; k >= 1; k--) {
-    candidates.add(parts.slice(0, k).join('.'));
-  }
-
-  const videoExts = settings.supportedVideoExtensions.map(e => e.toLowerCase());
-  const audioExts = settings.supportedAudioExtensions.map(e => e.toLowerCase());
-
-  // Lower rank = higher preference: all video (in configured order) before any audio.
-  const rank = (ext: string): number => {
-    const vi = videoExts.indexOf(ext);
-    if (vi >= 0) return vi;
-    const ai = audioExts.indexOf(ext);
-    return ai >= 0 ? videoExts.length + ai : Number.MAX_SAFE_INTEGER;
-  };
-
-  let best: TFile | null = null;
-  let bestRank = Number.MAX_SAFE_INTEGER;
-
-  for (const file of vault.getFiles()) {
-    if ((file.parent?.path ?? '') !== dir) continue;
-    if (!candidates.has(file.basename)) continue;
-
-    const ext = file.extension.toLowerCase();
-    if (!videoExts.includes(ext) && !audioExts.includes(ext)) continue;
-
-    const r = rank(ext);
-    if (r < bestRank) {
-      best = file;
-      bestRank = r;
-    }
-  }
-
-  return best;
 }
 
 /**

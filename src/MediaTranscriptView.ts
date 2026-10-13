@@ -1,13 +1,15 @@
 import { FileView, WorkspaceLeaf, TFile, Notice, Menu } from 'obsidian';
 import type MediaTranscriptPlugin from './main';
 import {
-  findSubtitleFiles,
-  findMediaForSubtitle,
+  findSubtitleTracks,
   resolvePriority,
   FoundSubtitleFile,
   SUBTITLE_EXTENSIONS,
 } from './utils/subtitleFinder';
+import { subtitleBaseName } from './utils/mediaMatch';
+import { ResolvedMedia, vaultMedia } from './mediaLocator';
 import { parseSubtitle, SubtitleSegment, formatTime } from './utils/subtitleParser';
+import { parseTimeFragment, timeFragment } from './utils/timeFragment';
 
 // Transcript text size bounds (px). Defined here rather than in settings.ts to
 // keep the import direction one-way: settings.ts → this file.
@@ -35,9 +37,15 @@ export class MediaTranscriptView extends FileView {
   private activeIndex = -1;
   private subtitleTracks: FoundSubtitleFile[] = [];
   private trackSelect: HTMLSelectElement | null = null;
-  // The media file actually being played. Usually equals `this.file`, but when
-  // a subtitle file is opened directly it's the media we resolved for it.
-  private mediaFile: TFile | null = null;
+  // The media being played: `this.file` itself, or — when a subtitle was
+  // opened — whatever MediaLocator found for it, possibly outside the vault.
+  // Null means reading-only: the transcript without a player.
+  private media: ResolvedMedia | null = null;
+  // Where the subtitle tracks live and the base name they share.
+  private trackBase = '';
+  private trackDir = '';
+  // Where we looked for media, shown when none was found.
+  private searched: string[] = [];
   // When opened via a subtitle file, the track to auto-select instead of the
   // priority-sorted default (null otherwise).
   private preferredTrackPath: string | null = null;
@@ -59,6 +67,9 @@ export class MediaTranscriptView extends FileView {
   private hitEls: HTMLElement[] = [];        // every highlighted occurrence, in order
   private hitIndex = -1;                     // which occurrence is the current one
   private highlightedSegs: number[] = [];    // segments whose text we rewrote
+  // A seek asked for before the player exists (a `#t=` link can arrive while
+  // the file is still loading); applied as soon as the media element is built.
+  private pendingSeek: { time: number; play: boolean } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: MediaTranscriptPlugin) {
     super(leaf);
@@ -67,7 +78,58 @@ export class MediaTranscriptView extends FileView {
 
   getViewType() { return VIEW_TYPE_MEDIA_TRANSCRIPT; }
   getDisplayText() {
-    return this.mediaFile?.basename ?? this.file?.basename ?? 'Media Transcript';
+    return this.media?.basename ?? this.file?.basename ?? 'Media Transcript';
+  }
+
+  /** The media being played (for a subtitle file opened directly, its media). */
+  getMediaFile(): TFile | null { return this.media?.file ?? null; }
+
+  /** Current playback position in seconds, or null when nothing is loaded. */
+  getCurrentTime(): number | null { return this.mediaEl?.currentTime ?? null; }
+
+  /** Jump to `seconds`, optionally starting playback; queued if not built yet. */
+  seekTo(seconds: number, play = true) {
+    const el = this.mediaEl;
+    if (!el) {
+      // Reading-only: nothing to play, so show where that moment is instead.
+      if (!this.media && this.segmentEls.length > 0) {
+        this.pendingSeek = null;
+        this.revealTime(seconds);
+      } else {
+        this.pendingSeek = { time: seconds, play };
+      }
+      return;
+    }
+    this.pendingSeek = null;
+    this.manualScrollUntil = 0;
+    const go = () => {
+      el.currentTime = seconds;
+      if (play && el.paused) void el.play();
+    };
+    if (el.readyState > 0) go();
+    else el.addEventListener('loadedmetadata', go, { once: true });
+  }
+
+  // Obsidian hands a link's subpath here, e.g. `[[talk.m4a#t=83]]` → '#t=83'.
+  setEphemeralState(state: unknown) {
+    const subpath = (state as { subpath?: unknown } | null)?.subpath;
+    const t = parseTimeFragment(typeof subpath === 'string' ? subpath : null);
+    if (t !== null) this.seekTo(t);
+  }
+
+  /**
+   * A link to this media at `seconds`, in the vault's link format, labelled
+   * with the readable time: `[[talk.m4a#t=83|1:23]]`. `sourcePath` is the note
+   * it will be pasted into (it decides how short the path can be).
+   */
+  timestampLink(seconds: number, sourcePath = ''): string {
+    // Media outside the vault can't be linked to, so link the transcript —
+    // opening it with `#t=` seeks just the same.
+    const file = this.media?.file ?? this.file;
+    if (!file) return formatTime(seconds);
+    return this.app.fileManager.generateMarkdownLink(
+      file, sourcePath, timeFragment(seconds), formatTime(seconds),
+    );
   }
 
   // ─── File lifecycle ───────────────────────────────────────────────────────
@@ -76,37 +138,40 @@ export class MediaTranscriptView extends FileView {
     this.contentEl.empty();
     this.contentEl.addClass('mt-view');
     this.contentEl.removeClass('mt-audio-mode');
+    this.contentEl.removeClass('mt-reading-mode');
     this.preferredTrackPath = null;
     this.transcriptSideEl = null;
+    this.searched = [];
 
-    // If a subtitle file was opened directly, resolve the media it belongs to
-    // (prefer video, else audio) and play that instead, pre-selecting this track.
-    let mediaFile = file;
     if (SUBTITLE_EXTENSIONS.includes(file.extension.toLowerCase())) {
-      const resolved = findMediaForSubtitle(file, this.app.vault, this.plugin.settings);
-      if (!resolved) {
-        this.mediaFile = null;
+      // Opened from a subtitle: it's the anchor. Find its media wherever it
+      // lives; without any, still open the transcript for reading.
+      const { media, searched } = await this.plugin.mediaLocator.resolveForSubtitle(file);
+      if (this.file !== file) return; // switched files while we were looking
+      if (!media && !(await this.parsesAsSubtitle(file))) {
         // `.json` is registered wholesale, so plenty of files land here that
-        // were never subtitles. Saying "no media found" misdiagnoses those —
-        // the problem isn't a missing sibling, it's that this isn't a subtitle.
-        const isSubtitle = await this.parsesAsSubtitle(file);
+        // were never subtitles. Say so rather than offer an empty transcript.
+        this.media = null;
         this.contentEl.createDiv('mt-empty').setText(
-          isSubtitle
-            ? `No media file found next to "${file.name}".\n` +
-                'Place a same-named audio/video file (e.g. .mp4 / .m4a / .mp3) in the same folder.'
-            : `"${file.name}" isn't a subtitle file.\n` +
-                'This view opens .srt / .vtt / .json subtitles that sit next to an audio or video file. ' +
-                'All .json files open here because extensions are claimed whole, not per file.',
+          `"${file.name}" isn't a subtitle file.\n` +
+            'This view opens .srt / .vtt / .json subtitles. ' +
+            'All .json files open here because extensions are claimed whole, not per file.',
         );
         return;
       }
-      mediaFile = resolved;
+      this.media = media;
+      this.searched = searched;
       this.preferredTrackPath = file.path;
+      this.trackDir = file.parent?.path ?? '';
+      this.trackBase = media?.basename ?? subtitleBaseName(file.name);
+    } else {
+      this.media = vaultMedia(this.app, file);
+      this.trackDir = this.plugin.settings.subtitleDirectory.trim() || (file.parent?.path ?? '');
+      this.trackBase = file.basename;
     }
-    this.mediaFile = mediaFile;
 
-    this.isVideo = this.plugin.settings.supportedVideoExtensions.includes(
-      mediaFile.extension.toLowerCase(),
+    this.isVideo = !!this.media && this.plugin.settings.supportedVideoExtensions.includes(
+      this.media.extension,
     );
 
     await this.buildLayout();
@@ -140,18 +205,23 @@ export class MediaTranscriptView extends FileView {
    * subtitle, the rendered segments and any active search intact.
    */
   private async buildLayout() {
-    const mediaFile = this.mediaFile;
-    if (!mediaFile) return;
-
+    const media = this.media;
     const showVideo = this.isVideo && !this.plugin.settings.videoAudioOnly;
     const reused = this.transcriptSideEl;
     if (reused) reused.detach();
 
     this.contentEl.empty();
     this.contentEl.removeClass('mt-audio-mode');
+    this.contentEl.removeClass('mt-reading-mode');
+    this.mediaEl = null;
 
     let transcriptSide: HTMLElement;
-    if (showVideo) {
+    if (!media) {
+      this.contentEl.addClass('mt-reading-mode');
+      this.buildNoMediaBar(this.contentEl.createDiv('mt-audio-bar mt-nomedia-bar'));
+      transcriptSide = reused ?? this.contentEl.createDiv('mt-transcript-side');
+      if (reused) this.contentEl.appendChild(reused);
+    } else if (showVideo) {
       const root = this.contentEl.createDiv('mt-root');
       const playerSide = root.createDiv('mt-player-side');
       const pct = this.plugin.settings.playerWidthPercent ?? 75;
@@ -159,20 +229,22 @@ export class MediaTranscriptView extends FileView {
       this.buildDivider(root, playerSide);
       transcriptSide = reused ?? root.createDiv('mt-transcript-side');
       if (reused) root.appendChild(reused);
-      this.buildVideoPlayer(playerSide, mediaFile);
+      this.buildVideoPlayer(playerSide, media);
     } else {
       this.contentEl.addClass('mt-audio-mode');
       const bar = this.contentEl.createDiv('mt-audio-bar');
-      this.buildAudioBar(bar, mediaFile);
+      this.buildAudioBar(bar, media);
       transcriptSide = reused ?? this.contentEl.createDiv('mt-transcript-side');
       if (reused) this.contentEl.appendChild(reused);
     }
 
     if (!reused) {
       this.transcriptSideEl = transcriptSide;
-      await this.buildTranscriptPanel(transcriptSide, mediaFile);
+      await this.buildTranscriptPanel(transcriptSide);
     }
     this.updateAudioOnlyBtn();
+
+    if (this.pendingSeek) this.seekTo(this.pendingSeek.time, this.pendingSeek.play);
   }
 
   /**
@@ -257,8 +329,8 @@ export class MediaTranscriptView extends FileView {
 
   // ─── Media player ─────────────────────────────────────────────────────────
 
-  private buildVideoPlayer(container: HTMLElement, file: TFile) {
-    const resourcePath = this.app.vault.getResourcePath(file);
+  private buildVideoPlayer(container: HTMLElement, media: ResolvedMedia) {
+    const resourcePath = media.src;
     const wrapper = container.createDiv('mt-player-wrapper');
     this.mediaEl = wrapper.createEl('video', {
       cls: 'mt-media',
@@ -268,10 +340,10 @@ export class MediaTranscriptView extends FileView {
     this.mediaEl.addEventListener('timeupdate', () => this.syncHighlight());
   }
 
-  private buildAudioBar(container: HTMLElement, file: TFile) {
-    const resourcePath = this.app.vault.getResourcePath(file);
+  private buildAudioBar(container: HTMLElement, media: ResolvedMedia) {
+    const resourcePath = media.src;
     container.createSpan('mt-audio-bar-icon').setText(this.isVideo ? '🎧' : '🎵');
-    container.createSpan('mt-audio-bar-title').setText(file.basename);
+    container.createSpan('mt-audio-bar-title').setText(media.basename);
     const audio = container.createEl('audio', {
       cls: 'mt-media-audio',
       attr: { src: resourcePath, controls: '' },
@@ -293,6 +365,20 @@ export class MediaTranscriptView extends FileView {
         void this.buildLayout();
       });
     }
+  }
+
+  // Reading-only header: say plainly there's nothing to play, and where we
+  // looked, so a missing drive or a settings typo explains itself.
+  private buildNoMediaBar(container: HTMLElement) {
+    container.createSpan('mt-audio-bar-icon').setText('📄');
+    container.createSpan('mt-audio-bar-title').setText(this.file?.basename ?? '');
+    const note = container.createSpan('mt-nomedia-note');
+    note.setText('No audio/video found · reading only');
+    note.setAttribute(
+      'title',
+      'Looked in:\n' + this.searched.map(s => '• ' + s).join('\n') +
+        '\n\nAdd folders under Settings → Media Transcript → Media folders.',
+    );
   }
 
   private buildSpeedControl(container: HTMLElement) {
@@ -344,10 +430,10 @@ export class MediaTranscriptView extends FileView {
 
   // ─── Transcript panel ─────────────────────────────────────────────────────
 
-  private async buildTranscriptPanel(container: HTMLElement, file: TFile) {
+  private async buildTranscriptPanel(container: HTMLElement) {
     // Toolbar row
     const toolbar = container.createDiv('mt-toolbar');
-    this.buildToolbar(toolbar, file);
+    this.buildToolbar(toolbar);
 
     // Search row
     this.buildSearchBar(container.createDiv('mt-searchbar'));
@@ -364,7 +450,7 @@ export class MediaTranscriptView extends FileView {
     }
 
     // Find & load subtitle files
-    this.subtitleTracks = findSubtitleFiles(file, this.app.vault, this.plugin.settings);
+    this.subtitleTracks = findSubtitleTracks(this.trackBase, this.trackDir, this.app.vault);
     const sorted = resolvePriority(this.subtitleTracks, this.plugin.settings.priorities);
     this.populateTrackSelect(sorted);
 
@@ -383,7 +469,7 @@ export class MediaTranscriptView extends FileView {
     }
   }
 
-  private buildToolbar(toolbar: HTMLElement, file: TFile) {
+  private buildToolbar(toolbar: HTMLElement) {
     // Subtitle source selector
     const selectWrap = toolbar.createDiv('mt-select-wrap');
     selectWrap.createEl('label', { text: 'Subtitle:', cls: 'mt-label' });
@@ -427,7 +513,7 @@ export class MediaTranscriptView extends FileView {
       cls: 'mt-btn',
       attr: { title: 'Export the current transcript as a Markdown note' },
     });
-    exportBtn.addEventListener('click', () => { void this.exportAsMarkdown(file); });
+    exportBtn.addEventListener('click', () => { void this.exportAsMarkdown(); });
   }
 
   /** Step the transcript font size by `delta` px, clamped, then persist + apply. */
@@ -666,7 +752,7 @@ export class MediaTranscriptView extends FileView {
       // by target beats guessing from whether a selection exists.
       const ts = el.createDiv('mt-ts');
       ts.setText(formatTime(seg.startTime));
-      ts.setAttribute('title', 'Play from here');
+      ts.setAttribute('title', this.media ? 'Play from here' : 'No audio/video to play');
       ts.addEventListener('click', (e: MouseEvent) => {
         e.stopPropagation();
         this.manualScrollUntil = 0;
@@ -696,7 +782,7 @@ export class MediaTranscriptView extends FileView {
       // Right-click → context menu
       el.addEventListener('contextmenu', (e: MouseEvent) => {
         const menu = new Menu();
-        menu.addItem(item =>
+        if (this.media) menu.addItem(item =>
           item
             .setTitle('Play from here')
             .setIcon('play')
@@ -713,6 +799,12 @@ export class MediaTranscriptView extends FileView {
             .setTitle('Copy timestamp')
             .setIcon('clock')
             .onClick(() => { void navigator.clipboard.writeText(formatTime(seg.startTime)); }),
+        );
+        menu.addItem(item =>
+          item
+            .setTitle('Copy timestamp link')
+            .setIcon('link')
+            .onClick(() => { void navigator.clipboard.writeText(this.timestampLink(seg.startTime)); }),
         );
         menu.addItem(item =>
           item
@@ -742,7 +834,7 @@ export class MediaTranscriptView extends FileView {
     // was listening at the time; a plugin loaded while a transcript is already
     // on screen would otherwise have no way to learn what it is looking at.
     if (this.transcriptEl) {
-      this.transcriptEl.dataset.mtMedia = this.mediaFile?.path ?? '';
+      this.transcriptEl.dataset.mtMedia = this.media?.location ?? '';
       this.transcriptEl.dataset.mtTrack = this.trackSelect?.value ?? '';
     }
 
@@ -750,7 +842,7 @@ export class MediaTranscriptView extends FileView {
       new CustomEvent('mt:transcript-rendered', {
         bubbles: true,
         detail: {
-          mediaPath: this.mediaFile?.path ?? null,
+          mediaPath: this.media?.location ?? null,
           trackPath: this.trackSelect?.value ?? null,
         },
       }),
@@ -812,15 +904,30 @@ export class MediaTranscriptView extends FileView {
     });
   }
 
+  /** Reading-only stand-in for a seek: mark and center the line at `seconds`. */
+  private revealTime(seconds: number) {
+    let idx = -1;
+    for (let i = 0; i < this.segments.length; i++) {
+      if (this.segments[i].startTime <= seconds) idx = i;
+      else break;
+    }
+    if (idx < 0) return;
+    if (this.activeIndex >= 0) this.segmentEls[this.activeIndex]?.removeClass('mt-active');
+    this.activeIndex = idx;
+    this.segmentEls[idx]?.addClass('mt-active');
+    this.scrollActiveIntoCenter(false);
+  }
+
   // ─── Export ───────────────────────────────────────────────────────────────
 
-  private async exportAsMarkdown(file: TFile) {
+  private async exportAsMarkdown() {
+    const base = this.trackBase;
     if (this.segments.length === 0) {
       new Notice('Nothing to export.');
       return;
     }
 
-    const lines = [`# ${file.basename}\n`];
+    const lines = [`# ${base}\n`];
     for (const seg of this.segments) {
       lines.push(`**${formatTime(seg.startTime)}** ${seg.text}\n`);
     }
@@ -830,10 +937,8 @@ export class MediaTranscriptView extends FileView {
     const selectedPath = this.trackSelect?.value ?? '';
     const selectedTrack = this.subtitleTracks.find(t => t.file.path === selectedPath);
     const marker = selectedTrack?.marker ?? '';
-    const mdName = marker
-      ? `${file.basename}.${marker}.md`
-      : `${file.basename}.md`;
-    const mdPath = (file.parent?.path ? file.parent.path + '/' : '') + mdName;
+    const mdName = marker ? `${base}.${marker}.md` : `${base}.md`;
+    const mdPath = (this.trackDir ? this.trackDir + '/' : '') + mdName;
 
     try {
       const existing = this.app.vault.getAbstractFileByPath(mdPath);

@@ -412,3 +412,60 @@ video.mt-media {
 .mt-error {
   color: var(--text-error);
 }
+
+/* ── Note embeds (![[talk.m4a]]) ──────────────── */
+
+/* The native player stays; we only add a button after it. */
+.mt-embed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mt-embed > audio {
+  flex: 1;
+  min-width: 200px;
+}
+
+.mt-embed-btn {
+  order: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-ui-small);
+  color: #8b5cf6;
+  cursor: pointer;
+}
+
+.theme-dark .mt-embed-btn {
+  color: #a78bfa;
+}
+
+.mt-embed-btn-icon {
+  display: inline-flex;
+}
+
+.mt-embed-btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Reading only (no media found) ────────────── */
+
+.mt-nomedia-note {
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  cursor: help;
+}
+
+/* Timestamps still mark time, but there's nothing to play. */
+.mt-reading-mode .mt-ts {
+  cursor: default;
+}
+
+.mt-reading-mode .mt-ts:hover {
+  background: none;
+  box-shadow: none;
+}

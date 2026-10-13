@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type MediaTranscriptPlugin from './main';
+import { parseFolderList } from './utils/mediaMatch';
 import {
   MediaTranscriptView,
   VIEW_TYPE_MEDIA_TRANSCRIPT,
@@ -17,6 +18,11 @@ export interface MediaTranscriptSettings {
   subtitleDirectory: string;
   priorities: SubtitlePriority[];
 
+  // ── Media lookup ─────────────────────────────────────────────────────────
+  // Where to look for a subtitle's media after its own folder, in order.
+  // Vault-relative folders, or absolute ones outside the vault (desktop only).
+  mediaFolders: string[];
+
   // ── Media file types ─────────────────────────────────────────────────────
   supportedVideoExtensions: string[];
   supportedAudioExtensions: string[];
@@ -33,6 +39,7 @@ export interface MediaTranscriptSettings {
 export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
+  mediaFolders: [],
   supportedVideoExtensions: ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'],
   supportedAudioExtensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'],
   playerWidthPercent: 75,
@@ -82,6 +89,28 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    // ── Media ───────────────────────────────────────────────────────────────
+    new Setting(containerEl).setName('Media').setHeading();
+
+    new Setting(containerEl)
+      .setName('Media folders')
+      .setDesc(
+        "Where to find a transcript's audio/video when it isn't in the transcript's own folder. " +
+          'One folder per line, searched in order, subfolders included; matched by filename. ' +
+          'A vault folder (附件/media) or, on desktop, an absolute folder outside the vault ' +
+          '(/Volumes/2T/Media, ~/Recordings). With no media found, the transcript opens for reading only.',
+      )
+      .addTextArea(t => {
+        t.setPlaceholder('附件/media\n/Volumes/2T/Media')
+          .setValue(this.plugin.settings.mediaFolders.join('\n'))
+          .onChange(async v => {
+            this.plugin.settings.mediaFolders = parseFolderList(v);
+            await this.plugin.saveSettings();
+            this.plugin.mediaLocator.invalidate();
+          });
+        t.inputEl.rows = 4;
+      });
 
     // ── Layout ──────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Layout').setHeading();
