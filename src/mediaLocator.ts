@@ -1,4 +1,4 @@
-import { App, Platform, TFile, normalizePath } from 'obsidian';
+import { App, Platform, TFile, normalizePath, requestUrl } from 'obsidian';
 import type { MediaTranscriptSettings } from './settings';
 import { findMediaForSubtitle } from './utils/subtitleFinder';
 import {
@@ -6,6 +6,8 @@ import {
   icloudPlaceholderName,
   isAbsoluteFolder,
   pickMedia,
+  remoteCandidates,
+  remoteFileUrl,
   subtitleBaseCandidates,
 } from './utils/mediaMatch';
 
@@ -42,6 +44,12 @@ const RESCAN_AFTER_MS = 30_000;
 // Guards against pointing the setting at `/` or a home folder by accident.
 const MAX_DEPTH = 12;
 const MAX_ENTRIES = 200_000;
+// A remote server that hasn't answered by now is treated as unreachable, so a
+// sleeping machine costs a short wait rather than a hung transcript.
+const REMOTE_TIMEOUT_MS = 5000;
+// …and remembered as such for a while, so opening several transcripts while
+// it's down doesn't cost the wait each time.
+const REMOTE_RETRY_AFTER_MS = 60_000;
 
 // The little of Node this file uses, typed locally: the project keeps Node
 // types out of tsconfig so nothing else picks up a dependency mobile lacks.
@@ -71,6 +79,8 @@ interface FolderIndex {
  *   2. each configured media folder, recursively — a vault folder, or (desktop
  *      only) an absolute folder outside the vault such as an external drive or
  *      an iCloud Drive folder
+ *   3. each remote media URL — a home server reached over Tailscale, say —
+ *      streamed rather than downloaded
  *
  * Matching is by filename alone (see mediaMatch.ts), so the media can be
  * filed however you like as long as its name is kept.
@@ -78,12 +88,14 @@ interface FolderIndex {
 export class MediaLocator {
   private external = new Map<string, FolderIndex>();
   private scanning = new Map<string, Promise<FolderIndex>>();
+  private unreachableSince = new Map<string, number>(); // remote base → when it last timed out
 
   constructor(private app: App, private settings: () => MediaTranscriptSettings) {}
 
   /** Forget external listings (settings changed). */
   invalidate() {
     this.external.clear();
+    this.unreachableSince.clear();
   }
 
   /** List external folders in the background so the first open is instant. */
@@ -129,7 +141,58 @@ export class MediaLocator {
       if (path) return { media: this.externalMedia(path), searched };
     }
 
+    for (const base of settings.mediaUrls) {
+      const { url, reachable } = await this.probeRemote(base, candidates);
+      searched.push(reachable ? base : `${base} (unreachable)`);
+      if (url) return { media: this.remoteMedia(url), searched };
+    }
+
     return { media: null, searched };
+  }
+
+  /**
+   * Ask `base` for every candidate file at once and keep the best that exists.
+   * A server can't be listed, so the remote folder is taken to be flat.
+   * requestUrl rather than fetch: it isn't subject to CORS, which a plain file
+   * server doesn't speak, and it works on mobile.
+   */
+  private async probeRemote(base: string, candidates: string[]): Promise<{ url: string | null; reachable: boolean }> {
+    const since = this.unreachableSince.get(base);
+    if (since !== undefined && Date.now() - since < REMOTE_RETRY_AFTER_MS) return { url: null, reachable: false };
+
+    const settings = this.settings();
+    const wanted = remoteCandidates(
+      candidates,
+      [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions],
+    );
+    let reachable = false;
+    const timeout = new Promise<null>(r => setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
+    const results = await Promise.all(wanted.map(async entry => {
+      const url = remoteFileUrl(base, entry.ref);
+      const status = await Promise.race([
+        requestUrl({ url, method: 'HEAD', throw: false }).then(r => r.status, () => null),
+        timeout,
+      ]);
+      if (status !== null) reachable = true; // any answer, even a 404, means it's up
+      return status !== null && status < 400 ? { ...entry, ref: url } : null;
+    }));
+    if (reachable) this.unreachableSince.delete(base);
+    else this.unreachableSince.set(base, Date.now());
+    const found = results.filter((e): e is MediaEntry<string> => e !== null);
+    const url = pickMedia(candidates, found, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
+    return { url, reachable };
+  }
+
+  private remoteMedia(url: string): ResolvedMedia {
+    const name = decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
+    const dot = name.lastIndexOf('.');
+    return {
+      src: url,
+      basename: name.slice(0, dot),
+      extension: name.slice(dot + 1).toLowerCase(),
+      file: null,
+      location: url,
+    };
   }
 
   private vaultEntries(folder: string): MediaEntry<TFile>[] {

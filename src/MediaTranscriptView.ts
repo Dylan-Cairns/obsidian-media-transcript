@@ -146,8 +146,12 @@ export class MediaTranscriptView extends FileView {
     if (SUBTITLE_EXTENSIONS.includes(file.extension.toLowerCase())) {
       // Opened from a subtitle: it's the anchor. Find its media wherever it
       // lives; without any, still open the transcript for reading.
+      // Asking a remote server can take a few seconds — don't sit blank.
+      const looking = this.contentEl.createDiv('mt-empty');
+      looking.setText('Looking for audio/video…');
       const { media, searched } = await this.plugin.mediaLocator.resolveForSubtitle(file);
       if (this.file !== file) return; // switched files while we were looking
+      looking.remove();
       if (!media && !(await this.parsesAsSubtitle(file))) {
         // `.json` is registered wholesale, so plenty of files land here that
         // were never subtitles. Say so rather than offer an empty transcript.
@@ -338,6 +342,17 @@ export class MediaTranscriptView extends FileView {
     });
     this.buildSpeedControl(wrapper);
     this.mediaEl.addEventListener('timeupdate', () => this.syncHighlight());
+    this.reportLoadErrors(this.mediaEl, media);
+  }
+
+  // Media outside the vault can vanish under us — a drive unplugged, a home
+  // server asleep. Say so; the transcript itself stays readable.
+  private reportLoadErrors(el: HTMLMediaElement, media: ResolvedMedia) {
+    if (media.file) return;
+    el.addEventListener('error', () => {
+      if (!el.getAttribute('src') || this.mediaEl !== el) return; // our own teardown
+      new Notice(`Can't load the media from ${media.location}. The transcript is still readable.`);
+    });
   }
 
   private buildAudioBar(container: HTMLElement, media: ResolvedMedia) {
@@ -351,6 +366,7 @@ export class MediaTranscriptView extends FileView {
     this.mediaEl = audio;
     this.buildSpeedControl(container);
     audio.addEventListener('timeupdate', () => this.syncHighlight());
+    this.reportLoadErrors(audio, media);
 
     // A video played through an <audio> element normally works (same demuxers),
     // but some containers refuse. If that happens, fall back to the video player

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   icloudPlaceholderName,
+  isRemoteUrl,
+  remoteCandidates,
+  remoteFileUrl,
   isAbsoluteFolder,
   parseFolderList,
   pickMedia,
@@ -75,5 +78,30 @@ describe('icloudPlaceholderName', () => {
   it('recovers the real name of an evicted file', () => {
     expect(icloudPlaceholderName('.talk.m4a.icloud')).toBe('talk.m4a');
     expect(icloudPlaceholderName('talk.m4a')).toBeNull();
+  });
+});
+
+describe('remote media', () => {
+  it('recognises URL prefixes', () => {
+    expect(isRemoteUrl('https://old-mac.taildfed27.ts.net/recordings')).toBe(true);
+    expect(isRemoteUrl('http://nas.local:8080')).toBe(true);
+    expect(isRemoteUrl('/Volumes/2T')).toBe(false);
+    expect(isRemoteUrl('附件/media')).toBe(false);
+  });
+
+  it('encodes the file name as one path segment', () => {
+    expect(remoteFileUrl('https://h.ts.net/recordings/', 'Recording 1.m4a'))
+      .toBe('https://h.ts.net/recordings/Recording%201.m4a');
+    expect(remoteFileUrl('https://h.ts.net', '录音#1.m4a')).toBe('https://h.ts.net/%E5%BD%95%E9%9F%B3%231.m4a');
+  });
+
+  it('asks for every candidate name with every extension', () => {
+    const names = remoteCandidates(['talk.whisper', 'talk'], ['MP4', 'm4a']).map(e => e.ref);
+    expect(names).toEqual(['talk.whisper.mp4', 'talk.whisper.m4a', 'talk.mp4', 'talk.m4a']);
+  });
+
+  it('feeds pickMedia so video still beats audio', () => {
+    const found = remoteCandidates(['talk'], ['m4a', 'mp4']);
+    expect(pickMedia(['talk'], found, VIDEO, AUDIO)).toBe('talk.mp4');
   });
 });

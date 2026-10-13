@@ -22,6 +22,8 @@ export interface MediaTranscriptSettings {
   // Where to look for a subtitle's media after its own folder, in order.
   // Vault-relative folders, or absolute ones outside the vault (desktop only).
   mediaFolders: string[];
+  // Then these URL prefixes, e.g. a home server over Tailscale. Streamed.
+  mediaUrls: string[];
 
   // ── Media file types ─────────────────────────────────────────────────────
   supportedVideoExtensions: string[];
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],
+  mediaUrls: [],
   supportedVideoExtensions: ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'],
   supportedAudioExtensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'],
   playerWidthPercent: 75,
@@ -110,6 +113,24 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
             this.plugin.mediaLocator.invalidate();
           });
         t.inputEl.rows = 4;
+      });
+
+    new Setting(containerEl)
+      .setName('Remote media URLs')
+      .setDesc(
+        'Searched after the folders above: a server holding the media, streamed with seeking — ' +
+          'e.g. a home computer over Tailscale (https://old-mac.example.ts.net/recordings). ' +
+          'One URL per line; files are expected directly under each URL, named like their transcript. ' +
+          "If a server doesn't answer within 5 seconds, the transcript opens for reading only.",
+      )
+      .addTextArea(t => {
+        t.setPlaceholder('https://old-mac.example.ts.net/recordings')
+          .setValue(this.plugin.settings.mediaUrls.join('\n'))
+          .onChange(async v => {
+            this.plugin.settings.mediaUrls = parseFolderList(v);
+            await this.plugin.saveSettings();
+          });
+        t.inputEl.rows = 3;
       });
 
     // ── Layout ──────────────────────────────────────────────────────────────

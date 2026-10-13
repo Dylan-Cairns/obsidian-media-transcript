@@ -97,3 +97,28 @@ export function icloudPlaceholderName(name: string): string | null {
   const m = name.match(/^\.(.+)\.icloud$/);
   return m ? m[1] : null;
 }
+
+/** A remote media location (an http(s) URL prefix) rather than a folder. */
+export function isRemoteUrl(location: string): boolean {
+  return /^https?:\/\//i.test(location);
+}
+
+/** The URL of `fileName` under `base`, the name percent-encoded as one segment. */
+export function remoteFileUrl(base: string, fileName: string): string {
+  return base.replace(/\/+$/, '') + '/' + encodeURIComponent(fileName);
+}
+
+/**
+ * Every file a server could hold for these candidate basenames: a server
+ * can't be listed, so each name × extension is asked for directly.
+ */
+export function remoteCandidates(candidates: string[], extensions: string[]): MediaEntry<string>[] {
+  const out: MediaEntry<string>[] = [];
+  for (const basename of candidates) {
+    for (const ext of extensions) {
+      const extension = ext.toLowerCase();
+      out.push({ basename, extension, ref: `${basename}.${extension}` });
+    }
+  }
+  return out;
+}

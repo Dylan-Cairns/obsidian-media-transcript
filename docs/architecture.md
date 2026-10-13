@@ -61,6 +61,26 @@ MediaTranscriptView.onLoadFile()
      播放地址是 `Platform.resourcePathPrefix` + 绝对路径。iCloud 被驱逐文件的
      `.name.icloud` 占位按真实文件名入索引，读取时由系统下载。
 
+3. 设置里的 **Remote media URLs**（每行一个 URL 前缀，如 Tailscale 上的家用机
+   `https://old-mac.xxx.ts.net/recordings`）：服务器没法列目录，所以对「候选名 × 扩展名」
+   **并发发 HEAD**，命中的再按同一规则挑。远端目录按**平铺**处理。用 `requestUrl` 而不是
+   `fetch`：前者不受 CORS 限制（rclone 这类文件服务不发 CORS 头），手机上也能用。
+   任何应答（含 404）都算「在线」；5s 没应答算**不可达**，并记 60s，期间再打开不再干等。
+   查找期间显示「Looking for audio/video…」，免得空白几秒。媒体在 vault 外时，播放中加载失败
+   会弹 Notice（硬盘拔了、服务器睡了），字幕照常可读。
+
+   家用机这一侧：macOS 版 Tailscale 因沙盒不能 `serve` 目录，只能反代，所以在本机
+   `127.0.0.1:8080` 跑 `rclone serve http --read-only --dir-cache-time 10s`（支持 Range），
+   再 `tailscale serve --bg http://127.0.0.1:8080`。`--dir-cache-time` 默认 5 分钟，
+   新挪过去的文件会 404 那么久。
+
+   **Obsidian 录音是分段 MP4**（每 60s 一个 moof、开头没有总索引），远程冷启动要把所有段头
+   读一遍：实测 8–9s 才能播。无损重封装 `ffmpeg -c copy -f mp4 -movflags +faststart`
+   （`.m4a` 后缀会选到不支持 opus 的 ipod muxer，必须 `-f mp4`）后 0.1–0.2s。
+
+   **系统代理**：Chromium 走系统代理，代理的 DIRECT 从物理网卡出去、到不了 Tailscale 的 utun，
+   路由规则救不了；必须把 `*.ts.net`、`100.64.0.0/10` 加进系统代理**例外**。
+
 配对只看**文件名**（`utils/mediaMatch.ts`，纯函数有单测）：字幕名的每个点分前缀都是候选，
 视频优先于音频，再按设置里的扩展名顺序。
 
