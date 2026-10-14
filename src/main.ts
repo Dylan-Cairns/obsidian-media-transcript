@@ -1,4 +1,4 @@
-import { App, Component, Plugin, TFile, WorkspaceLeaf, parseLinktext, setIcon } from 'obsidian';
+import { App, Component, Plugin, TFile, Workspace, WorkspaceLeaf, parseLinktext, setIcon } from 'obsidian';
 import { EmbedCreator, TranscriptCards, embedRegistry } from './embeds';
 import { MediaTranscriptView, VIEW_TYPE_MEDIA_TRANSCRIPT } from './MediaTranscriptView';
 import { MediaTranscriptSettingTab, DEFAULT_SETTINGS } from './settings';
@@ -146,7 +146,7 @@ export default class MediaTranscriptPlugin extends Plugin {
       leaf = leaves[0] ?? ws.getLeaf('split', 'vertical');
       await leaf.setViewState({ type: VIEW_TYPE_MEDIA_TRANSCRIPT, state: { file: file.path } });
     }
-    await ws.revealLeaf(leaf);
+    ws.setActiveLeaf(leaf, { focus: true });
     if (seconds !== null && leaf.view instanceof MediaTranscriptView) {
       leaf.view.seekTo(seconds, play);
     }
@@ -248,7 +248,10 @@ export default class MediaTranscriptPlugin extends Plugin {
    */
   private routeMediaLinks() {
     const ws = this.app.workspace;
-    const original = ws.openLinkText;
+    // Usually inherited from the prototype; unwrapping then means deleting our
+    // own property, so the workspace ends up exactly as it was.
+    const saved = Object.getOwnPropertyDescriptor(ws, 'openLinkText');
+    const original = ws.openLinkText.bind(ws);
     let active = true;
     const wrapper: typeof ws.openLinkText = async (linktext, sourcePath, newLeaf, openViewState) => {
       if (active && !newLeaf) {
@@ -266,12 +269,14 @@ export default class MediaTranscriptPlugin extends Plugin {
           return;
         }
       }
-      return original.call(ws, linktext, sourcePath, newLeaf, openViewState);
+      return original(linktext, sourcePath, newLeaf, openViewState);
     };
     ws.openLinkText = wrapper;
     this.register(() => {
       active = false;
-      if (ws.openLinkText === wrapper) ws.openLinkText = original;
+      if (ws.openLinkText !== wrapper) return;
+      if (saved) Object.defineProperty(ws, 'openLinkText', saved);
+      else delete (ws as Partial<Workspace>).openLinkText;
     });
   }
 

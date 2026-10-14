@@ -7,6 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "bundler",
     "strictNullChecks": true,
+    "strictBindCallApply": true,
     "importHelpers": true,
     "isolatedModules": true,
     "lib": ["ES2018", "DOM"]

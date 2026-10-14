@@ -166,7 +166,7 @@ export class MediaLocator {
       [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions],
     );
     let reachable = false;
-    const timeout = new Promise<null>(r => setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
+    const timeout = new Promise<null>(r => window.setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
     const results = await Promise.all(wanted.map(async entry => {
       const url = remoteFileUrl(base, entry.ref);
       const status = await Promise.race([
