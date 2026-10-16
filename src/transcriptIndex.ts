@@ -1,13 +1,14 @@
-import { TAbstractFile, TFile, normalizePath } from 'obsidian';
+import { FileSystemAdapter, Platform, TAbstractFile, TFile, normalizePath } from 'obsidian';
 import type MediaTranscriptPlugin from './main';
 import { readSource, writeSource } from './utils/transcriptSource';
 
 interface CachedSource { mtime: number; size: number; source: string | null }
 interface CacheFile { version: 1; files: Record<string, CachedSource> }
 
-// Read this many transcripts between yields, so indexing a large vault on
-// startup never holds up the UI.
-const BATCH = 25;
+// Read this many transcripts at a time. Node reads files on a pool of four
+// threads that Obsidian shares, so a few at a time keeps a slow read from
+// holding up everything else (plugin manifests, notes).
+const BATCH = 2;
 const SAVE_DELAY_MS = 2000;
 
 /**
@@ -157,6 +158,11 @@ export class TranscriptIndex {
   }
 
   private async read(file: TFile, announce = true): Promise<string | null> {
+    if (await isOffloaded(this.app.vault.adapter, file)) {
+      // Reading it would make iCloud download it. It is read once it is back
+      // on disk (next start), or when it is opened; not caching it ensures that.
+      return this.sources.get(file.path) ?? null;
+    }
     let source: string | null = null;
     try {
       source = readSource(await this.app.vault.cachedRead(file));
@@ -223,5 +229,26 @@ export class TranscriptIndex {
       const data: CacheFile = { version: 1, files: this.cache };
       void this.app.vault.adapter.write(this.cachePath, JSON.stringify(data)).catch(() => {});
     }, SAVE_DELAY_MS);
+  }
+}
+
+// The little of Node used here, typed locally (the project keeps Node types out).
+interface NodeStat { size: number; blocks: number }
+interface NodeFs { promises: { stat(path: string): Promise<NodeStat> } }
+
+/**
+ * Whether the file is only a placeholder of one iCloud offloaded: it has a size
+ * but no data on disk. stat doesn't download it; reading would, and every read
+ * waiting on a download ties up a thread Obsidian needs. Desktop only.
+ */
+async function isOffloaded(adapter: unknown, file: TFile): Promise<boolean> {
+  if (!Platform.isDesktopApp || !(adapter instanceof FileSystemAdapter) || file.stat.size === 0) return false;
+  try {
+    const req = (window as unknown as { require: (id: string) => unknown }).require;
+    const fs = req('fs') as NodeFs;
+    const st = await fs.promises.stat(adapter.getFullPath(file.path));
+    return st.size > 0 && st.blocks === 0;
+  } catch {
+    return false;
   }
 }
