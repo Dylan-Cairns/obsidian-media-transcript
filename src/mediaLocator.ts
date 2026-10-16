@@ -4,6 +4,7 @@ import { findMediaForSubtitle } from './utils/subtitleFinder';
 import { RemoteIndex, nameKey, parseRemoteIndex, remotePathUrl } from './utils/transcriptSource';
 import {
   MediaEntry,
+  audioTwin,
   icloudPlaceholderName,
   isAbsoluteFolder,
   pickMedia,
@@ -19,6 +20,10 @@ export interface ResolvedMedia {
   extension: string;    // lowercase
   file: TFile | null;   // set when the media is a vault file
   location: string;     // vault path or absolute path — for display and data attributes
+  // For a video: an audio file of the same name beside it (an .m4a made for
+  // listening), played instead when the picture is hidden — it is a fraction
+  // of the size, so it starts sooner, above all from a server.
+  audioTwin?: ResolvedMedia | null;
 }
 
 export interface MediaLookup {
@@ -147,9 +152,9 @@ export class MediaLocator {
 
     const fromServers = async (): Promise<MediaLookup | null> => {
       for (const base of settings.mediaUrls) {
-        const { url, reachable } = await this.findRemote(base, candidates, source);
+        const { url, twin, reachable } = await this.findRemote(base, candidates, source);
         searched.push(reachable ? base : `${base} (unreachable)`);
-        if (url) return { media: this.remoteMedia(url), searched };
+        if (url) return { media: { ...this.remoteMedia(url), audioTwin: twin ? this.remoteMedia(twin) : null }, searched };
       }
       return null;
     };
@@ -165,20 +170,20 @@ export class MediaLocator {
     const siblings = this.app.vault.getFiles().filter(f => (f.parent?.path ?? '') === dir)
       .map(f => ({ basename: f.basename, extension: f.extension, ref: f }));
     const sibling = source ? pick(siblings) : findMediaForSubtitle(subtitle, this.app.vault, settings);
-    if (sibling) return { media: vaultMedia(this.app, sibling), searched };
+    if (sibling) return { media: this.vaultMediaWithTwin(sibling), searched };
 
     // Named media elsewhere in the vault — the transcript was moved, not its media.
     if (source) {
       searched.push(`vault (${source})`);
       const elsewhere = this.app.metadataCache.getFirstLinkpathDest(source, subtitle.path);
-      if (elsewhere && isMedia(elsewhere.extension)) return { media: vaultMedia(this.app, elsewhere), searched };
+      if (elsewhere && isMedia(elsewhere.extension)) return { media: this.vaultMediaWithTwin(elsewhere), searched };
     }
 
     for (const folder of settings.mediaFolders) {
       if (!isAbsoluteFolder(folder)) {
         searched.push(folder);
         const file = pick(this.vaultEntries(folder));
-        if (file) return { media: vaultMedia(this.app, file), searched };
+        if (file) return { media: this.vaultMediaWithTwin(file), searched };
         continue;
       }
 
@@ -193,7 +198,10 @@ export class MediaLocator {
         path = index.entries ? pick(index.entries) : null;
       }
       searched.push(index.entries ? folder : `${folder} (unavailable)`);
-      if (path) return { media: this.externalMedia(path), searched };
+      if (path) {
+        const twin = this.twinName(path, (_, sibling) => index.entries?.find(e => e.ref === sibling)?.ref ?? null);
+        return { media: { ...this.externalMedia(path), audioTwin: twin ? this.externalMedia(twin) : null }, searched };
+      }
     }
 
     if (!settings.preferRemote) {
@@ -236,9 +244,9 @@ export class MediaLocator {
    */
   private async findRemote(
     base: string, candidates: string[], source: string | null,
-  ): Promise<{ url: string | null; reachable: boolean }> {
+  ): Promise<{ url: string | null; twin: string | null; reachable: boolean }> {
     let server = await this.serverIndex(base);
-    if (!server) return { url: null, reachable: false };
+    if (!server) return { url: null, twin: null, reachable: false };
     if (!server.index) return this.probeRemote(base, candidates, source);
 
     let path = this.lookUp(server.index, candidates, source);
@@ -247,7 +255,23 @@ export class MediaLocator {
       server = await this.serverIndex(base);
       path = server?.index ? this.lookUp(server.index, candidates, source) : null;
     }
-    return { url: path ? remotePathUrl(base, path) : null, reachable: true };
+    if (!path || !server?.index) return { url: null, twin: null, reachable: true };
+    const index = server.index;
+    const twin = this.twinName(path, name => index.byName.get(nameKey(name)) ?? null);
+    return { url: remotePathUrl(base, path), twin: twin ? remotePathUrl(base, twin) : null, reachable: true };
+  }
+
+  private twinName(path: string, find: (name: string, sibling: string) => string | null): string | null {
+    const settings = this.settings();
+    return audioTwin(path, settings.supportedVideoExtensions, settings.supportedAudioExtensions, find);
+  }
+
+  /** A vault file as media, with its audio twin beside it (see ResolvedMedia). */
+  vaultMediaWithTwin(file: TFile): ResolvedMedia {
+    const twin = this.twinName(file.path, (_, sibling) =>
+      this.app.vault.getAbstractFileByPath(sibling) instanceof TFile ? sibling : null);
+    const twinFile = twin ? this.app.vault.getAbstractFileByPath(twin) : null;
+    return { ...vaultMedia(this.app, file), audioTwin: twinFile instanceof TFile ? vaultMedia(this.app, twinFile) : null };
   }
 
   private lookUp(index: RemoteIndex, candidates: string[], source: string | null): string | null {
@@ -312,7 +336,7 @@ export class MediaLocator {
    */
   private async probeRemote(
     base: string, candidates: string[], source: string | null,
-  ): Promise<{ url: string | null; reachable: boolean }> {
+  ): Promise<{ url: string | null; twin: string | null; reachable: boolean }> {
     const settings = this.settings();
     const wanted = remoteCandidates(
       candidates,
@@ -340,7 +364,8 @@ export class MediaLocator {
     const exact = source ? found.find(e => decodeURIComponent(e.ref.slice(e.ref.lastIndexOf('/') + 1)) === source) : undefined;
     const url = exact?.ref ??
       pickMedia(candidates, found, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
-    return { url, reachable };
+    const twin = url ? this.twinName(url, (_, sibling) => found.find(e => e.ref === sibling)?.ref ?? null) : null;
+    return { url, twin, reachable };
   }
 
   private remoteMedia(url: string): ResolvedMedia {

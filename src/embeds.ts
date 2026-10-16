@@ -202,9 +202,11 @@ export class TranscriptCards {
         return;
       }
       status.remove();
-      const isVideo = this.plugin.settings.supportedVideoExtensions.includes(media.extension);
+      // Listening to videos: their audio twin, when there is one, starts sooner.
+      const played = this.plugin.settings.videoAudioOnly ? (media.audioTwin ?? media) : media;
+      const isVideo = this.plugin.settings.supportedVideoExtensions.includes(played.extension);
       // `#t=` on the source is the media-fragment start, same as a native embed.
-      const src = media.src + (startAt !== null ? `#t=${startAt}` : '');
+      const src = played.src + (startAt !== null ? `#t=${startAt}` : '');
       player = body.createEl(isVideo ? 'video' : 'audio', {
         cls: isVideo ? 'mt-card-video' : 'mt-card-audio',
         attr: { src, controls: '', preload: 'metadata' },

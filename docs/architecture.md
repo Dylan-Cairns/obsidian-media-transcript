@@ -108,6 +108,13 @@ Obsidian 外改名（下次看到的是新文件）照样能认出来；插件�
    读一遍：实测 8–9s 才能播。无损重封装 `ffmpeg -c copy -f mp4 -movflags +faststart`
    （`.m4a` 后缀会选到不支持 opus 的 ipod muxer，必须 `-f mp4`）后 0.1–0.2s。
 
+   **视频的音频版**：找到的是视频时，顺带看它旁边有没有同名音频（`talk.mp4` → `talk.m4a`，
+   按 `supportedAudioExtensions` 顺序；服务器上按 `index.json` 的名字查），记在
+   `ResolvedMedia.audioTwin`。「Audio only」模式（视图和笔记里的卡片）播它而不是视频：
+   南添 2 小时录屏 mp4 2.1GB、开头的 `moov` 7.8MB，远程冷启动 1–3s；同名 m4a 207MB，
+   0.2–0.7s。两者时间轴一致（时长差 <0.15s），切换模式按秒数接着播。视频本身仍是
+   `media`，所以切回视频、时间戳链接都不变。
+
    **系统代理**：Chromium 走系统代理，代理的 DIRECT 从物理网卡出去、到不了 Tailscale 的 utun，
    路由规则救不了；必须把 `*.ts.net`、`100.64.0.0/10` 加进系统代理**例外**。
 

@@ -8,7 +8,7 @@ import {
 } from './utils/subtitleFinder';
 import { subtitleBaseName } from './utils/mediaMatch';
 import { trackMarker } from './utils/transcriptSource';
-import { ResolvedMedia, vaultMedia } from './mediaLocator';
+import type { ResolvedMedia } from './mediaLocator';
 import { parseSubtitle, SubtitleSegment, formatTime } from './utils/subtitleParser';
 import { parseTimeFragment, timeFragment } from './utils/timeFragment';
 
@@ -174,7 +174,7 @@ export class MediaTranscriptView extends FileView {
         ? media.basename
         : subtitleBaseName(file.name);
     } else {
-      this.media = vaultMedia(this.app, file);
+      this.media = this.plugin.mediaLocator.vaultMediaWithTwin(file);
       this.trackDir = this.plugin.settings.subtitleDirectory.trim() || (file.parent?.path ?? '');
       this.trackBase = file.basename;
     }
@@ -368,7 +368,10 @@ export class MediaTranscriptView extends FileView {
     });
   }
 
-  private buildAudioBar(container: HTMLElement, media: ResolvedMedia) {
+  private buildAudioBar(container: HTMLElement, video: ResolvedMedia) {
+    // A video listened to plays its audio twin when it has one: same
+    // recording, a fraction of the bytes to fetch before it starts.
+    const media = this.isVideo ? (video.audioTwin ?? video) : video;
     const resourcePath = media.src;
     container.createSpan('mt-audio-bar-icon').setText(this.isVideo ? '🎧' : '🎵');
     container.createSpan('mt-audio-bar-title').setText(media.basename);

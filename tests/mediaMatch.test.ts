@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  audioTwin,
   icloudPlaceholderName,
   isRemoteUrl,
   remoteCandidates,
@@ -103,5 +104,31 @@ describe('remote media', () => {
   it('feeds pickMedia so video still beats audio', () => {
     const found = remoteCandidates(['talk'], ['m4a', 'mp4']);
     expect(pickMedia(['talk'], found, VIDEO, AUDIO)).toBe('talk.mp4');
+  });
+});
+
+describe('audioTwin', () => {
+  const video = ['mp4', 'mov'];
+  const audio = ['m4a', 'mp3'];
+  const have = (...paths: string[]) => (_: string, sibling: string) => (paths.includes(sibling) ? sibling : null);
+
+  it('finds the audio file named like a video, beside it', () => {
+    expect(audioTwin('南添/录制于 19.27.28.mp4', video, audio, have('南添/录制于 19.27.28.m4a'))).toBe('南添/录制于 19.27.28.m4a');
+    expect(audioTwin('/Volumes/d/talk.MOV', video, audio, have('/Volumes/d/talk.mp3'))).toBe('/Volumes/d/talk.mp3');
+  });
+
+  it('takes audio extensions in order of preference', () => {
+    expect(audioTwin('talk.mp4', video, audio, have('talk.mp3', 'talk.m4a'))).toBe('talk.m4a');
+  });
+
+  it('has none for audio, other folders or other names', () => {
+    expect(audioTwin('talk.m4a', video, audio, have('talk.mp3'))).toBeNull();
+    expect(audioTwin('a/talk.mp4', video, audio, have('b/talk.m4a'))).toBeNull();
+    expect(audioTwin('talk.mp4', video, audio, have('talk 2.m4a'))).toBeNull();
+  });
+
+  it('lets a server look up by filename alone', () => {
+    const byName = new Map([['talk.m4a', 'audio/talk.m4a']]);
+    expect(audioTwin('video/talk.mp4', video, audio, name => byName.get(name) ?? null)).toBe('audio/talk.m4a');
   });
 });

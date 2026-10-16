@@ -74,6 +74,29 @@ export function pickMedia<T>(
   return best;
 }
 
+/**
+ * The audio file named like the video at `path` ("talk.mp4" → "talk.m4a"),
+ * as `find` reports it; null for audio, or a video without one. `find` gets
+ * the twin's filename and the path it would have beside the video, so it
+ * can look up by either.
+ */
+export function audioTwin(
+  path: string,
+  videoExts: string[],
+  audioExts: string[],
+  find: (name: string, sibling: string) => string | null,
+): string | null {
+  const name = path.slice(path.search(/[^\\/]*$/));
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || !videoExts.map(e => e.toLowerCase()).includes(name.slice(dot + 1).toLowerCase())) return null;
+  for (const ext of audioExts) {
+    const twin = `${name.slice(0, dot)}.${ext}`;
+    const hit = find(twin, path.slice(0, path.length - name.length) + twin);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** An absolute (outside-the-vault) folder, as opposed to a vault-relative one. */
 export function isAbsoluteFolder(folder: string): boolean {
   return folder.startsWith('/') || folder.startsWith('~') || /^[A-Za-z]:[\\/]/.test(folder);
