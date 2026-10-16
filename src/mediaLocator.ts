@@ -102,6 +102,7 @@ export class MediaLocator {
   private scanning = new Map<string, Promise<FolderIndex>>();
   private unreachableSince = new Map<string, number>(); // remote base → when it last timed out
   private serverIndexes = new Map<string, ServerIndex>();
+  private fetchingIndexes = new Map<string, Promise<ServerIndex | null>>();
 
   constructor(
     private app: App,
@@ -267,17 +268,31 @@ export class MediaLocator {
   private async serverIndex(base: string): Promise<ServerIndex | null> {
     const cached = this.serverIndexes.get(base);
     if (cached) return cached;
-    const since = this.unreachableSince.get(base);
-    if (since !== undefined && Date.now() - since < REMOTE_RETRY_AFTER_MS) return null;
+    let job = this.fetchingIndexes.get(base);
+    if (!job) {
+      const since = this.unreachableSince.get(base);
+      if (since !== undefined && Date.now() - since < REMOTE_RETRY_AFTER_MS) return null;
+      job = this.fetchIndex(base);
+      this.fetchingIndexes.set(base, job);
+      void job.finally(() => this.fetchingIndexes.delete(base));
+    }
+    // Everything looking at once shares one download. Waiting is capped, but
+    // the download carries on: if it arrives late it is kept and the server
+    // counts as reachable again, instead of being skipped for a minute.
+    const timeout = new Promise<'timeout'>(r => window.setTimeout(() => r('timeout'), REMOTE_TIMEOUT_MS));
+    const res = await Promise.race([job, timeout]);
+    if (res === 'timeout') {
+      if (!this.serverIndexes.has(base)) this.unreachableSince.set(base, Date.now());
+      return this.serverIndexes.get(base) ?? null;
+    }
+    return res;
+  }
 
-    const timeout = new Promise<null>(r => window.setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
+  private async fetchIndex(base: string): Promise<ServerIndex | null> {
     // A plain file server sends no caching rules, so without no-cache the
     // index can be answered from a stale copy and point at moved files.
-    const res = await Promise.race([
-      requestUrl({ url: remotePathUrl(base, 'index.json'), headers: { 'Cache-Control': 'no-cache' }, throw: false })
-        .then(r => ({ status: r.status, text: r.status === 200 ? r.text : '' }), () => null),
-      timeout,
-    ]);
+    const res = await requestUrl({ url: remotePathUrl(base, 'index.json'), headers: { 'Cache-Control': 'no-cache' }, throw: false })
+      .then(r => ({ status: r.status, text: r.status === 200 ? r.text : '' }), () => null);
     if (!res) {
       this.unreachableSince.set(base, Date.now());
       return null;
