@@ -1,11 +1,15 @@
-import { App, Component, Plugin, TFile, Workspace, WorkspaceLeaf, parseLinktext, setIcon } from 'obsidian';
+import {
+  App, Component, Notice, Plugin, TAbstractFile, TFile, Workspace, WorkspaceLeaf, normalizePath, parseLinktext, setIcon,
+} from 'obsidian';
 import { EmbedCreator, TranscriptCards, embedRegistry } from './embeds';
 import { MediaTranscriptView, VIEW_TYPE_MEDIA_TRANSCRIPT } from './MediaTranscriptView';
 import { MediaTranscriptSettingTab, DEFAULT_SETTINGS } from './settings';
 import type { MediaTranscriptSettings } from './settings';
-import { SUBTITLE_EXTENSIONS, findSubtitleFiles } from './utils/subtitleFinder';
+import { SUBTITLE_EXTENSIONS, findSubtitleFiles, findSubtitleTracks } from './utils/subtitleFinder';
 import { parseTimeFragment } from './utils/timeFragment';
 import { MediaLocator } from './mediaLocator';
+import { TranscriptIndex } from './transcriptIndex';
+import { LinkMediaModal } from './linkMediaModal';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -35,14 +39,20 @@ function viewRegistry(app: App): ViewRegistry {
 export default class MediaTranscriptPlugin extends Plugin {
   settings!: MediaTranscriptSettings;
   mediaLocator!: MediaLocator;
+  transcripts!: TranscriptIndex;
   private cards!: TranscriptCards;
   // Core embed factories we wrapped, by extension, to put back on unload.
   private wrappedEmbeds = new Map<string, { original: EmbedCreator; wrapper: EmbedCreator }>();
 
   async onload() {
     await this.loadSettings();
-    this.mediaLocator = new MediaLocator(this.app, () => this.settings);
-    this.app.workspace.onLayoutReady(() => this.mediaLocator.warm());
+    this.transcripts = new TranscriptIndex(this);
+    this.mediaLocator = new MediaLocator(this.app, () => this.settings, f => this.transcripts.sourceOf(f));
+    this.app.workspace.onLayoutReady(() => {
+      this.transcripts.start();
+      this.mediaLocator.warm();
+    });
+    this.registerEvent(this.app.vault.on('rename', (f, oldPath) => { void this.followRename(f, oldPath); }));
 
     this.registerView(
       VIEW_TYPE_MEDIA_TRANSCRIPT,
@@ -121,9 +131,27 @@ export default class MediaTranscriptPlugin extends Plugin {
       },
     });
 
+    // When a transcript can't find its media — renamed outside Obsidian, or
+    // a format with no room to say — point it at the right file by hand.
+    this.addCommand({
+      id: 'link-transcript-media',
+      name: 'Link transcript to its audio/video',
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || !this.isSubtitle(file)) return false;
+        if (!checking) void this.linkMedia(file);
+        return true;
+      },
+    });
+
     this.wrapMediaEmbeds();
     this.cards = new TranscriptCards(this);
-    this.app.workspace.onLayoutReady(() => this.cards.start());
+    this.app.workspace.onLayoutReady(() => {
+      this.cards.start();
+      // Embeds of moved-out media whose transcript was renamed can only be
+      // matched once the transcripts have been read.
+      this.transcripts.onChange(() => this.cards.refresh());
+    });
     this.routeMediaLinks();
 
     this.addSettingTab(new MediaTranscriptSettingTab(this.app, this));
@@ -152,8 +180,72 @@ export default class MediaTranscriptPlugin extends Plugin {
     }
   }
 
+  /** Ask which media `transcript` belongs to, record it, and reopen it. */
+  async linkMedia(transcript: TFile) {
+    const choices = await this.mediaLocator.listAll();
+    if (choices.length === 0) {
+      new Notice('No audio/video found in the vault, media folders or on a server.');
+      return;
+    }
+    choices.sort((a, b) => a.name.localeCompare(b.name));
+    new LinkMediaModal(this.app, choices, choice => {
+      void (async () => {
+        await this.transcripts.setSource(transcript, choice.name);
+        for (const view of this.transcriptViews()) {
+          if (view.file === transcript) await view.reload();
+        }
+      })();
+    }).open();
+  }
+
+  /**
+   * A media file renamed in Obsidian takes its transcripts along: they're
+   * renamed to match (Obsidian updates links to them), and a transcript that
+   * names the media as its source is told the new name. Without this, the
+   * pair would only be held together by the name until the media moves out.
+   * A move that keeps the name needs nothing — lookups are by name.
+   */
+  private async followRename(file: TAbstractFile, oldPath: string) {
+    if (!(file instanceof TFile)) return;
+    if (this.isSubtitle(file)) {
+      await this.transcripts.moveLink(oldPath, file.path);
+      return;
+    }
+    if (!this.isMedia(file)) return;
+    const oldName = oldPath.slice(oldPath.lastIndexOf('/') + 1);
+    if (oldName === file.name) return;
+    const oldBase = oldName.replace(/\.[^.]+$/, '');
+    const oldDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : '';
+
+    await this.transcripts.whenReady();
+    const tracks = new Set<TFile>(this.transcripts.transcriptsFor(oldName));
+    const dir = this.settings.subtitleDirectory.trim() || oldDir;
+    for (const t of findSubtitleTracks(oldBase, dir, this.app.vault)) tracks.add(t.file);
+
+    let renamed = 0;
+    const blocked: string[] = [];
+    for (const t of tracks) {
+      if ((await this.transcripts.sourceOf(t))?.toLowerCase() === oldName.toLowerCase()) {
+        await this.transcripts.setSource(t, file.name);
+      }
+      if (!t.name.startsWith(oldBase + '.')) continue; // named its own way: leave the name
+      const target = normalizePath(`${t.parent?.path ?? ''}/${file.basename}${t.name.slice(oldBase.length)}`);
+      if (this.app.vault.getAbstractFileByPath(target)) {
+        blocked.push(t.name);
+        continue;
+      }
+      await this.app.fileManager.renameFile(t, target);
+      renamed++;
+    }
+    if (renamed > 0) new Notice(`Renamed ${renamed} transcript${renamed > 1 ? 's' : ''} to match ${file.name}`);
+    if (blocked.length > 0) {
+      new Notice(`Kept ${blocked.join(', ')}: a file with the new name already exists.`);
+    }
+  }
+
   private hasSubtitles(file: TFile): boolean {
-    return findSubtitleFiles(file, this.app.vault, this.settings).length > 0;
+    return findSubtitleFiles(file, this.app.vault, this.settings).length > 0 ||
+      this.transcripts.transcriptsFor(file.name).length > 0;
   }
 
   private transcriptViews(): MediaTranscriptView[] {
@@ -283,6 +375,7 @@ export default class MediaTranscriptPlugin extends Plugin {
   onunload() {
     this.unwrapMediaEmbeds();
     this.cards?.stop();
+    this.transcripts?.stop();
     // Release the extensions we took over (they stay registered otherwise).
     try {
       viewRegistry(this.app).unregisterExtensions([

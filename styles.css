@@ -460,6 +460,14 @@ video.mt-media {
   cursor: help;
 }
 
+.mt-link-media-btn {
+  flex: none;
+}
+
+.mt-link-where {
+  color: var(--text-muted);
+}
+
 /* Timestamps still mark time, but there's nothing to play. */
 .mt-reading-mode .mt-ts {
   cursor: default;

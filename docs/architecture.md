@@ -18,8 +18,14 @@ obsidian-media-transcript/
 │   ├── main.ts             # 插件入口：注册视图、接管媒体扩展名、设置页
 │   ├── MediaTranscriptView.ts  # 主视图（播放器 + 字幕面板 + 交互）
 │   ├── settings.ts         # 设置类型 + 设置页面 UI
+│   ├── mediaLocator.ts     # 给字幕找媒体：同目录 → vault → 媒体文件夹 → 服务器
+│   ├── transcriptIndex.ts  # 字幕 → 媒体名（读字幕里的 source），可随时重建的缓存
+│   ├── embeds.ts           # 笔记里的卡片：媒体挪走后的 ![[x.m4a]]、![[x.json]]
+│   ├── linkMediaModal.ts   # 手动关联媒体的选择框
 │   └── utils/
 │       ├── subtitleFinder.ts   # 按命名约定查找字幕文件
+│       ├── mediaMatch.ts       # 按文件名配对的规则
+│       ├── transcriptSource.ts # 读写 source、解析服务器 index.json
 │       └── subtitleParser.ts   # 解析 SRT / VTT / JSON
 └── docs/
     └── architecture.md     # 本文件
@@ -51,19 +57,41 @@ MediaTranscriptView.onLoadFile()
 
 ## 找媒体（以字幕为锚）
 
-打开字幕文件时，字幕是锚点，媒体可以在任何地方。`MediaLocator.resolveForSubtitle()` 按顺序找：
+打开字幕文件时，字幕是锚点，媒体可以在任何地方。
+
+**先问字幕自己**：转录工具会把媒体文件名写进 JSON（`"source": "talk.m4a"`）。字幕文件名
+在 Obsidian、Finder、手机上都可能被改，内容不会，所以 `source` 是第一依据；文件名推算只是
+没有 `source` 时的备用（SRT/VTT、别的工具）。`.srt`/`.vtt` 没地方写，手动关联的结果记在
+设置 `mediaLinks`（字幕路径 → 媒体名），在 Obsidian 里改名时跟着挪。
+
+`TranscriptIndex` 反过来回答「哪些字幕属于 talk.m4a」，给笔记里 `![[talk.m4a]]` 的卡片用。
+它只是从文件内容推出来的缓存：vault 的 create/modify/rename/delete 事件都会重读该文件，
+Obsidian 外改名（下次看到的是新文件）照样能认出来；插件目录里的 `transcript-sources.json`
+只为启动时少读没变过的文件，删了也只是重读一遍（250 份 JSON 冷启动约 0.1s）。
+
+`MediaLocator.resolveForSubtitle()` 按顺序找（有 `source` 时每一步都先精确匹配它）：
+
+设置 **Play from a server first**（`preferRemote`）打开时，第 4 步挪到最前：先问服务器，没有或
+连不上再按 1–3 找本地。给「本地副本在 iCloud、可能只是占位符」的库用——本地播放要先等整份下载。
 
 1. 字幕**同目录**
-2. 设置里的 **Media folders**（每行一个，按顺序，含子文件夹）：
+2. 有 `source` 时，**整个 vault** 里叫这个名字的媒体（字幕被挪走、媒体没动）
+3. 设置里的 **Media folders**（每行一个，按顺序，含子文件夹）：
    - vault 内路径：在 `vault.getFiles()` 里按前缀过滤
    - 绝对路径（外接盘、iCloud Drive 文件夹）：**仅桌面**，用 Node `fs` 递归列一遍并缓存；
      没命中且缓存超过 30s 才重扫，免得「本来就没媒体」的字幕每次都去扫 2T 的盘。
      播放地址是 `Platform.resourcePathPrefix` + 绝对路径。iCloud 被驱逐文件的
      `.name.icloud` 占位按真实文件名入索引，读取时由系统下载。
 
-3. 设置里的 **Remote media URLs**（每行一个 URL 前缀，如 Tailscale 上的家用机
-   `https://old-mac.xxx.ts.net/recordings`）：服务器没法列目录，所以对「候选名 × 扩展名」
-   **并发发 HEAD**，命中的再按同一规则挑。远端目录按**平铺**处理。用 `requestUrl` 而不是
+4. 设置里的 **Remote media URLs**（每行一个 URL 前缀，如 Tailscale 上的家用机
+   `https://old-mac.xxx.ts.net/library`）：先取 `<URL>/index.json`（挪文件脚本写的，
+   `files[].path / sha256 / names`），按名字查路径——服务器可以按年月分文件夹，
+   在服务器上改过名的文件靠 `names` 里的旧名照样找得到；没查到且索引超过 30s 才重取。
+   名字比较前做 NFC + 小写（`nameKey`）：macOS 文件名常是分解形式，同一个「é」/中文标点
+   在 JSON 里和磁盘上可能是两种写法。取索引时带 `Cache-Control: no-cache`：rclone 不发缓存头，
+   Electron 的 `requestUrl` 会按启发式缓存，拿到旧索引就会指向已挪走的路径。
+   没有 `index.json` 的服务器没法列目录，就对「候选名 × 扩展名」**并发发 HEAD**，
+   命中的再按同一规则挑，远端目录按**平铺**处理。用 `requestUrl` 而不是
    `fetch`：前者不受 CORS 限制（rclone 这类文件服务不发 CORS 头），手机上也能用。
    任何应答（含 404）都算「在线」；5s 没应答算**不可达**，并记 60s，期间再打开不再干等。
    查找期间显示「Looking for audio/video…」，免得空白几秒。媒体在 vault 外时，播放中加载失败
@@ -85,7 +113,11 @@ MediaTranscriptView.onLoadFile()
 视频优先于音频，再按设置里的扩展名顺序。
 
 **都找不到 → 只读模式**（`mt-reading-mode`），不再报错：字幕照常显示、搜索、复制、导出，
-顶栏写「No audio/video found · reading only」，悬停列出查过哪些地方（盘没插、路径写错一眼可见）。
+顶栏写「No audio/video found · reading only」，悬停列出查过哪些地方（盘没插、路径写错一眼可见），
+旁边「Link media…」从 vault、媒体文件夹、服务器索引里挑一个关联（JSON 写进 `source`）。
+
+**媒体还在 vault 时在 Obsidian 里改名**，字幕跟着改名（`fileManager.renameFile`，链接随之更新），
+`source` 是旧名的也改成新名；只挪文件夹不改名不用动。
 时间戳不可播放；`#t=` 链接改为高亮并居中那一句。
 
 媒体不在 vault 里时没法链接它，所以时间戳链接改为指向**字幕文件**（`[[x.json#t=83|1:23]]`），

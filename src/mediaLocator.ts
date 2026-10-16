@@ -1,6 +1,7 @@
 import { App, Platform, TFile, normalizePath, requestUrl } from 'obsidian';
 import type { MediaTranscriptSettings } from './settings';
 import { findMediaForSubtitle } from './utils/subtitleFinder';
+import { RemoteIndex, nameKey, parseRemoteIndex, remotePathUrl } from './utils/transcriptSource';
 import {
   MediaEntry,
   icloudPlaceholderName,
@@ -50,6 +51,9 @@ const REMOTE_TIMEOUT_MS = 5000;
 // …and remembered as such for a while, so opening several transcripts while
 // it's down doesn't cost the wait each time.
 const REMOTE_RETRY_AFTER_MS = 60_000;
+// A server's index.json is fetched once and reused; a name it doesn't list
+// refetches it, but not more often than this.
+const REMOTE_INDEX_REFRESH_MS = 30_000;
 
 // The little of Node this file uses, typed locally: the project keeps Node
 // types out of tsconfig so nothing else picks up a dependency mobile lacks.
@@ -66,6 +70,14 @@ function nodeModules(): NodeModules {
     path: req('path') as NodeModules['path'],
     os: req('os') as NodeModules['os'],
   };
+}
+
+/** Something a transcript could be linked to by hand, for the picker. */
+export interface MediaChoice { name: string; where: string }
+
+interface ServerIndex {
+  fetchedAt: number;
+  index: RemoteIndex | null; // null = the server has no index.json: files are flat, by name
 }
 
 interface FolderIndex {
@@ -89,13 +101,20 @@ export class MediaLocator {
   private external = new Map<string, FolderIndex>();
   private scanning = new Map<string, Promise<FolderIndex>>();
   private unreachableSince = new Map<string, number>(); // remote base → when it last timed out
+  private serverIndexes = new Map<string, ServerIndex>();
 
-  constructor(private app: App, private settings: () => MediaTranscriptSettings) {}
+  constructor(
+    private app: App,
+    private settings: () => MediaTranscriptSettings,
+    // What the transcript itself says its media is called (see TranscriptIndex).
+    private sourceOf: (subtitle: TFile) => Promise<string | null>,
+  ) {}
 
-  /** Forget external listings (settings changed). */
+  /** Forget external listings and server indexes (settings changed, or a retry). */
   invalidate() {
     this.external.clear();
     this.unreachableSince.clear();
+    this.serverIndexes.clear();
   }
 
   /** List external folders in the background so the first open is instant. */
@@ -109,15 +128,50 @@ export class MediaLocator {
     const settings = this.settings();
     const searched: string[] = [];
 
+    // The name the transcript gives is trusted first; its own filename is
+    // only a guess, and the only clue for transcripts that don't say.
+    const source = await this.sourceOf(subtitle);
+    const candidates = subtitleBaseCandidates(subtitle.name);
+    const isMedia = (ext: string) =>
+      [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions].includes(ext.toLowerCase());
+    const pick = <T>(entries: Iterable<MediaEntry<T>>): T | null => {
+      const list = Array.from(entries);
+      if (source) {
+        const wanted = source.toLowerCase();
+        const exact = list.find(e => `${e.basename}.${e.extension}`.toLowerCase() === wanted);
+        if (exact) return exact.ref;
+      }
+      return pickMedia(candidates, list, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
+    };
+
+    const fromServers = async (): Promise<MediaLookup | null> => {
+      for (const base of settings.mediaUrls) {
+        const { url, reachable } = await this.findRemote(base, candidates, source);
+        searched.push(reachable ? base : `${base} (unreachable)`);
+        if (url) return { media: this.remoteMedia(url), searched };
+      }
+      return null;
+    };
+    // A server copy is preferred over one on disk that may first have to be
+    // downloaded (iCloud keeps only placeholders of files it offloaded).
+    if (settings.preferRemote) {
+      const remote = await fromServers();
+      if (remote) return remote;
+    }
+
     const dir = subtitle.parent?.path ?? '';
     searched.push(`same folder (${dir || '/'})`);
-    const sibling = findMediaForSubtitle(subtitle, this.app.vault, settings);
+    const siblings = this.app.vault.getFiles().filter(f => (f.parent?.path ?? '') === dir)
+      .map(f => ({ basename: f.basename, extension: f.extension, ref: f }));
+    const sibling = source ? pick(siblings) : findMediaForSubtitle(subtitle, this.app.vault, settings);
     if (sibling) return { media: vaultMedia(this.app, sibling), searched };
 
-    const candidates = subtitleBaseCandidates(subtitle.name);
-    const pick = <T>(entries: Iterable<MediaEntry<T>>) => pickMedia(
-      candidates, entries, settings.supportedVideoExtensions, settings.supportedAudioExtensions,
-    );
+    // Named media elsewhere in the vault — the transcript was moved, not its media.
+    if (source) {
+      searched.push(`vault (${source})`);
+      const elsewhere = this.app.metadataCache.getFirstLinkpathDest(source, subtitle.path);
+      if (elsewhere && isMedia(elsewhere.extension)) return { media: vaultMedia(this.app, elsewhere), searched };
+    }
 
     for (const folder of settings.mediaFolders) {
       if (!isAbsoluteFolder(folder)) {
@@ -141,30 +195,118 @@ export class MediaLocator {
       if (path) return { media: this.externalMedia(path), searched };
     }
 
-    for (const base of settings.mediaUrls) {
-      const { url, reachable } = await this.probeRemote(base, candidates);
-      searched.push(reachable ? base : `${base} (unreachable)`);
-      if (url) return { media: this.remoteMedia(url), searched };
+    if (!settings.preferRemote) {
+      const remote = await fromServers();
+      if (remote) return remote;
     }
 
     return { media: null, searched };
   }
 
+  /** Every media file we can see, for linking a transcript to one by hand. */
+  async listAll(): Promise<MediaChoice[]> {
+    const settings = this.settings();
+    const exts = [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions];
+    const out: MediaChoice[] = [];
+    const seen = new Set<string>();
+    const add = (name: string, where: string) => {
+      const key = `${name}\u0000${where}`;
+      if (!seen.has(key)) { seen.add(key); out.push({ name, where }); }
+    };
+    for (const f of this.app.vault.getFiles()) {
+      if (exts.includes(f.extension.toLowerCase())) add(f.name, f.parent?.path || '/');
+    }
+    for (const folder of settings.mediaFolders) {
+      if (!isAbsoluteFolder(folder) || !Platform.isDesktopApp) continue;
+      const index = await this.indexOf(folder);
+      for (const e of index.entries ?? []) add(`${e.basename}.${e.extension}`, folder);
+    }
+    for (const base of settings.mediaUrls) {
+      const server = await this.serverIndex(base);
+      for (const name of server?.index?.names ?? []) add(name, base);
+    }
+    return out;
+  }
+
   /**
-   * Ask `base` for every candidate file at once and keep the best that exists.
-   * A server can't be listed, so the remote folder is taken to be flat.
+   * Find the media on a server. With an index.json, by name in the index —
+   * the server may keep files in any folders, under any name they've had.
+   * Without one, ask for each candidate file directly under `base`.
+   */
+  private async findRemote(
+    base: string, candidates: string[], source: string | null,
+  ): Promise<{ url: string | null; reachable: boolean }> {
+    let server = await this.serverIndex(base);
+    if (!server) return { url: null, reachable: false };
+    if (!server.index) return this.probeRemote(base, candidates, source);
+
+    let path = this.lookUp(server.index, candidates, source);
+    if (!path && Date.now() - server.fetchedAt > REMOTE_INDEX_REFRESH_MS) {
+      this.serverIndexes.delete(base);
+      server = await this.serverIndex(base);
+      path = server?.index ? this.lookUp(server.index, candidates, source) : null;
+    }
+    return { url: path ? remotePathUrl(base, path) : null, reachable: true };
+  }
+
+  private lookUp(index: RemoteIndex, candidates: string[], source: string | null): string | null {
+    if (source) {
+      const hit = index.byName.get(nameKey(source));
+      if (hit) return hit;
+    }
+    const settings = this.settings();
+    const entries = remoteCandidates(
+      candidates, [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions],
+    )
+      .map(e => ({ ...e, ref: index.byName.get(nameKey(e.ref)) ?? '' }))
+      .filter(e => e.ref !== '');
+    return pickMedia(candidates, entries, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
+  }
+
+  /** The server's index (or that it has none), or null when it can't be reached. */
+  private async serverIndex(base: string): Promise<ServerIndex | null> {
+    const cached = this.serverIndexes.get(base);
+    if (cached) return cached;
+    const since = this.unreachableSince.get(base);
+    if (since !== undefined && Date.now() - since < REMOTE_RETRY_AFTER_MS) return null;
+
+    const timeout = new Promise<null>(r => window.setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
+    // A plain file server sends no caching rules, so without no-cache the
+    // index can be answered from a stale copy and point at moved files.
+    const res = await Promise.race([
+      requestUrl({ url: remotePathUrl(base, 'index.json'), headers: { 'Cache-Control': 'no-cache' }, throw: false })
+        .then(r => ({ status: r.status, text: r.status === 200 ? r.text : '' }), () => null),
+      timeout,
+    ]);
+    if (!res) {
+      this.unreachableSince.set(base, Date.now());
+      return null;
+    }
+    this.unreachableSince.delete(base);
+    const server = { fetchedAt: Date.now(), index: res.status === 200 ? parseRemoteIndex(res.text) : null };
+    this.serverIndexes.set(base, server);
+    return server;
+  }
+
+  /**
+   * A server without an index.json: ask `base` for every candidate file at
+   * once and keep the best that exists. It can't be listed, so the remote
+   * folder is taken to be flat.
    * requestUrl rather than fetch: it isn't subject to CORS, which a plain file
    * server doesn't speak, and it works on mobile.
    */
-  private async probeRemote(base: string, candidates: string[]): Promise<{ url: string | null; reachable: boolean }> {
-    const since = this.unreachableSince.get(base);
-    if (since !== undefined && Date.now() - since < REMOTE_RETRY_AFTER_MS) return { url: null, reachable: false };
-
+  private async probeRemote(
+    base: string, candidates: string[], source: string | null,
+  ): Promise<{ url: string | null; reachable: boolean }> {
     const settings = this.settings();
     const wanted = remoteCandidates(
       candidates,
       [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions],
     );
+    if (source) {
+      const dot = source.lastIndexOf('.');
+      wanted.unshift({ basename: source.slice(0, dot), extension: source.slice(dot + 1).toLowerCase(), ref: source });
+    }
     let reachable = false;
     const timeout = new Promise<null>(r => window.setTimeout(() => r(null), REMOTE_TIMEOUT_MS));
     const results = await Promise.all(wanted.map(async entry => {
@@ -179,7 +321,10 @@ export class MediaLocator {
     if (reachable) this.unreachableSince.delete(base);
     else this.unreachableSince.set(base, Date.now());
     const found = results.filter((e): e is MediaEntry<string> => e !== null);
-    const url = pickMedia(candidates, found, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
+    // The transcript's own word first (it leads `wanted`), then the name rule.
+    const exact = source ? found.find(e => decodeURIComponent(e.ref.slice(e.ref.lastIndexOf('/') + 1)) === source) : undefined;
+    const url = exact?.ref ??
+      pickMedia(candidates, found, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
     return { url, reachable };
   }
 

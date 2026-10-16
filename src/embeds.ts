@@ -1,6 +1,7 @@
 import { App, Component, TFile, parseLinktext, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from './main';
-import { SUBTITLE_EXTENSIONS, findSubtitlesByBaseName, resolvePriority } from './utils/subtitleFinder';
+import { FoundSubtitleFile, SUBTITLE_EXTENSIONS, findSubtitlesByBaseName, resolvePriority } from './utils/subtitleFinder';
+import { trackMarker } from './utils/transcriptSource';
 import { parseSubtitle } from './utils/subtitleParser';
 import { parseTimeFragment } from './utils/timeFragment';
 import { subtitleBaseName } from './utils/mediaMatch';
@@ -37,6 +38,7 @@ const MISSING_EMBED = '.internal-embed.mod-empty-attachment[src]';
 export class TranscriptCards {
   private players = new Set<HTMLMediaElement>();
   private observers: MutationObserver[] = [];
+  private docs: Document[] = [];
   private registered: string[] = [];
 
   constructor(readonly plugin: MediaTranscriptPlugin) {}
@@ -63,15 +65,30 @@ export class TranscriptCards {
     this.registered = [];
     for (const o of this.observers) o.disconnect();
     this.observers = [];
+    this.docs = [];
     for (const p of this.players) this.release(p);
     this.players.clear();
   }
 
-  /** The preferred transcript for media called `mediaName`, anywhere in the vault. */
+  /**
+   * The preferred transcript for media called `mediaName`, anywhere in the
+   * vault: those that name it as their source (whatever they're called now),
+   * then those named after it.
+   */
   transcriptFor(mediaName: string): TFile | null {
-    const base = mediaName.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '');
-    const found = findSubtitlesByBaseName(base, this.plugin.app.vault);
+    const name = mediaName.replace(/^.*[\\/]/, '');
+    const found: FoundSubtitleFile[] = this.plugin.transcripts.transcriptsFor(name).map(file => ({
+      file, marker: trackMarker(file.name), extension: file.extension.toLowerCase(),
+    }));
+    for (const f of findSubtitlesByBaseName(name.replace(/\.[^.]+$/, ''), this.plugin.app.vault)) {
+      if (!found.some(g => g.file === f.file)) found.push(f);
+    }
     return resolvePriority(found, this.plugin.settings.priorities)[0]?.file ?? null;
+  }
+
+  /** Look again at "not found" embeds — the transcript index learned something. */
+  refresh() {
+    for (const doc of this.docs) this.scan(doc.body);
   }
 
   isMediaName(name: string): boolean {
@@ -94,6 +111,7 @@ export class TranscriptCards {
     });
     observer.observe(doc.body, { childList: true, subtree: true });
     this.observers.push(observer);
+    this.docs.push(doc);
     this.scan(doc.body);
   }
 

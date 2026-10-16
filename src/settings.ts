@@ -24,6 +24,11 @@ export interface MediaTranscriptSettings {
   mediaFolders: string[];
   // Then these URL prefixes, e.g. a home server over Tailscale. Streamed.
   mediaUrls: string[];
+  // Ask those servers before looking on disk at all.
+  preferRemote: boolean;
+  // Media picked by hand for a transcript that can't name its own (an .srt or
+  // .vtt has nowhere to keep a `source`): transcript path → media filename.
+  mediaLinks: Record<string, string>;
 
   // ── Media file types ─────────────────────────────────────────────────────
   supportedVideoExtensions: string[];
@@ -43,6 +48,8 @@ export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],
   mediaUrls: [],
+  preferRemote: false,
+  mediaLinks: {},
   supportedVideoExtensions: ['mp4', 'webm', 'mkv', 'mov', 'avi', 'm4v'],
   supportedAudioExtensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'opus'],
   playerWidthPercent: 75,
@@ -120,7 +127,8 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       .setDesc(
         'Searched after the folders above: a server holding the media, streamed with seeking — ' +
           'e.g. a home computer over Tailscale (https://old-mac.example.ts.net/recordings). ' +
-          'One URL per line; files are expected directly under each URL, named like their transcript. ' +
+          'One URL per line. A server with an index.json (written by the offload script) can keep files ' +
+          'in any folders; otherwise files are expected directly under the URL, by name. ' +
           "If a server doesn't answer within 5 seconds, the transcript opens for reading only.",
       )
       .addTextArea(t => {
@@ -129,9 +137,24 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
           .onChange(async v => {
             this.plugin.settings.mediaUrls = parseFolderList(v);
             await this.plugin.saveSettings();
+            this.plugin.mediaLocator.invalidate();
           });
         t.inputEl.rows = 3;
       });
+
+    new Setting(containerEl)
+      .setName('Play from a server first')
+      .setDesc(
+        'Look for media on the servers above before the vault and media folders, and use the vault copy ' +
+          "only when no server has it or none answers. Useful when local copies live in iCloud and " +
+          'would have to download before playing.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.preferRemote).onChange(async v => {
+          this.plugin.settings.preferRemote = v;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     // ── Layout ──────────────────────────────────────────────────────────────
     new Setting(containerEl).setName('Layout').setHeading();

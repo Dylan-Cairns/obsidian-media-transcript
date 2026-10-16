@@ -7,6 +7,7 @@ import {
   SUBTITLE_EXTENSIONS,
 } from './utils/subtitleFinder';
 import { subtitleBaseName } from './utils/mediaMatch';
+import { trackMarker } from './utils/transcriptSource';
 import { ResolvedMedia, vaultMedia } from './mediaLocator';
 import { parseSubtitle, SubtitleSegment, formatTime } from './utils/subtitleParser';
 import { parseTimeFragment, timeFragment } from './utils/timeFragment';
@@ -167,7 +168,11 @@ export class MediaTranscriptView extends FileView {
       this.searched = searched;
       this.preferredTrackPath = file.path;
       this.trackDir = file.parent?.path ?? '';
-      this.trackBase = media?.basename ?? subtitleBaseName(file.name);
+      // Sibling tracks share the transcript's own name, which is the media's
+      // only while nobody has renamed it.
+      this.trackBase = media && file.name.startsWith(media.basename + '.')
+        ? media.basename
+        : subtitleBaseName(file.name);
     } else {
       this.media = vaultMedia(this.app, file);
       this.trackDir = this.plugin.settings.subtitleDirectory.trim() || (file.parent?.path ?? '');
@@ -323,6 +328,14 @@ export class MediaTranscriptView extends FileView {
     this.searchInput?.select();
   }
 
+  /** Look for the media again and rebuild (after linking it by hand, say). */
+  async reload() {
+    const file = this.file;
+    if (!file) return;
+    await this.onUnloadFile(file);
+    await this.onLoadFile(file);
+  }
+
   async onUnloadFile(_file: TFile) {
     if (this.mediaEl) {
       this.mediaEl.pause();
@@ -395,6 +408,14 @@ export class MediaTranscriptView extends FileView {
       'Looked in:\n' + this.searched.map(s => '• ' + s).join('\n') +
         '\n\nAdd folders under Settings → Media Transcript → Media folders.',
     );
+    const file = this.file;
+    if (!file) return;
+    const link = container.createEl('button', {
+      cls: 'mt-btn mt-link-media-btn',
+      text: 'Link media…',
+      attr: { 'aria-label': 'Pick the audio/video this transcript belongs to' },
+    });
+    link.addEventListener('click', () => { void this.plugin.linkMedia(file); });
   }
 
   private buildSpeedControl(container: HTMLElement) {
@@ -466,7 +487,19 @@ export class MediaTranscriptView extends FileView {
     }
 
     // Find & load subtitle files
-    this.subtitleTracks = findSubtitleTracks(this.trackBase, this.trackDir, this.app.vault);
+    // Tracks named alongside, plus any that name this media as their source
+    // under another name or in another folder — and always the one opened.
+    const tracks = findSubtitleTracks(this.trackBase, this.trackDir, this.app.vault);
+    const add = (file: TFile) => {
+      if (!tracks.some(t => t.file === file)) {
+        tracks.push({ file, marker: trackMarker(file.name), extension: file.extension.toLowerCase() });
+      }
+    };
+    if (this.media) {
+      for (const f of this.plugin.transcripts.transcriptsFor(`${this.media.basename}.${this.media.extension}`)) add(f);
+    }
+    if (this.preferredTrackPath && this.file?.path === this.preferredTrackPath) add(this.file);
+    this.subtitleTracks = tracks;
     const sorted = resolvePriority(this.subtitleTracks, this.plugin.settings.priorities);
     this.populateTrackSelect(sorted);
 
