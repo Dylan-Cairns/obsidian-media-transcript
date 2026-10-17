@@ -19,8 +19,11 @@ export interface ArchiveSettings {
 	includedPaths: string[];
 	/** Where to read copies from, first choice first; the remote URL comes after all of them. */
 	sources: ArchiveSource[];
-	/** Per server URL: archived files (<bucket>/<sha1>.<ext>) not uploaded there yet. */
-	pendingUploads: Record<string, string[]>;
+	/**
+	 * Keep new downloads in the local archive too. Off (with a server in the
+	 * sources), they are kept on the servers only: locally just until uploaded.
+	 */
+	keepLocalCopies: boolean;
 }
 
 export const DEFAULT_SETTINGS: ArchiveSettings = {
@@ -30,7 +33,7 @@ export const DEFAULT_SETTINGS: ArchiveSettings = {
 	autoArchiveOnModify: true,
 	includedPaths: [],
 	sources: [{ kind: "local" }],
-	pendingUploads: {},
+	keepLocalCopies: true,
 };
 
 export function normalizeServerUrl(url: string): string {
@@ -39,6 +42,11 @@ export function normalizeServerUrl(url: string): string {
 
 export function serverUrls(sources: ArchiveSource[]): string[] {
 	return sources.flatMap((s) => (s.kind === "server" && s.url ? [s.url] : []));
+}
+
+/** Whether new downloads go to the local archive: always, unless servers are set to hold them alone. */
+export function keepsLocal(settings: Pick<ArchiveSettings, "sources" | "keepLocalCopies">): boolean {
+	return settings.keepLocalCopies || serverUrls(settings.sources).length === 0;
 }
 
 /**

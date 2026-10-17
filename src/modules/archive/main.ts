@@ -2,7 +2,7 @@ import { MarkdownPostProcessorContext, Notice, TFile } from "obsidian";
 import { ModulePlugin } from "../module";
 import { resolve } from "./resolver";
 import { extractUrls } from "./scanner";
-import { download, DownloadResult } from "./downloader";
+import { download, DownloadResult, writeFile } from "./downloader";
 import { ArchiveSettings, DEFAULT_SETTINGS, isExternalPath, isInScope, migrateSources } from "./settings";
 import { ArchiveSettingTab } from "./settings-ui";
 import { redirectAllMedia } from "./intercept";
@@ -156,7 +156,7 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 
 	async loadSettings() {
 		// Saved settings from any earlier version: the current fields, plus 0.6.0's serverUrl/sourceOrder.
-		const raw = ((await this.loadData()) ?? {}) as Partial<ArchiveSettings> & { serverUrl?: unknown; sourceOrder?: unknown };
+		const raw = ((await this.loadData()) ?? {}) as Partial<ArchiveSettings> & { serverUrl?: unknown; sourceOrder?: unknown; pendingUploads?: unknown };
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, raw);
 		// Migration: pre-v0.5 configs only had `archiveDirName`. Seed the new central
 		// path with that value so a user who later flips to "central" mode keeps the
@@ -165,9 +165,25 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 			this.settings.centralArchivePath = raw.archiveDirName;
 		}
 		this.settings.sources = migrateSources(raw);
-		this.settings.pendingUploads = { ...(raw.pendingUploads ?? {}) };
 		delete (this.settings as { serverUrl?: unknown }).serverUrl;
 		delete (this.settings as { sourceOrder?: unknown }).sourceOrder;
+		// Earlier versions kept the upload queue here, in data.json, which Sync shares.
+		const legacy = (this.settings as { pendingUploads?: Record<string, string[]> }).pendingUploads;
+		delete (this.settings as { pendingUploads?: unknown }).pendingUploads;
+		if (legacy && Object.keys(legacy).length) {
+			this.servers.adopt(legacy);
+			await this.saveSettings();
+		}
+	}
+
+	async writeLocal(path: string, buf: ArrayBuffer): Promise<void> {
+		const local = storeFor(this.app.vault, path);
+		if (local) await writeFile(local, this.app.vault, this.settings, path, buf);
+	}
+
+	async removeLocal(path: string): Promise<void> {
+		const local = storeFor(this.app.vault, path);
+		if (local && (await local.store.exists(local.path))) await local.store.remove(local.path);
 	}
 
 	async readLocal(path: string): Promise<ArrayBuffer | null> {

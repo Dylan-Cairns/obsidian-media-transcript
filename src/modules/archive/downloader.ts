@@ -1,6 +1,6 @@
 import { Vault, requestUrl } from "obsidian";
 import { matchPolicy } from "./policies";
-import type { ArchiveSettings } from "./settings";
+import { keepsLocal, type ArchiveSettings } from "./settings";
 import { archiveRoot, ensureDir, ensureMarker } from "./fs-util";
 import { storeFor, type Store } from "./store";
 import type { ArchiveServers } from "./servers";
@@ -32,13 +32,15 @@ export async function download(
 	const policy = matchPolicy(url);
 	if (!policy.archive) return "skipped-policy";
 
-	if (!dest) {
+	// Kept here too, or on the servers only (and here just until they have it).
+	const kept = dest && keepsLocal(settings) ? dest : null;
+	if (!kept) {
 		if (await servers.storedAnywhere(url)) return "skipped-exists";
 	} else {
 		// Another device may have archived it already; its copy is quicker and surer than the original.
 		const archived = await servers.fetch(url);
 		if (archived) {
-			await writeFile(dest, vault, settings, destPath, archived);
+			await writeFile(kept, vault, settings, destPath, archived);
 			await servers.store(destPath, archived);
 			return "downloaded";
 		}
@@ -62,8 +64,8 @@ export async function download(
 			]);
 
 			if (response.status === 200) {
-				if (dest) await writeFile(dest, vault, settings, destPath, response.arrayBuffer);
-				const uploaded = await servers.store(destPath, response.arrayBuffer, !!dest);
+				if (kept) await writeFile(kept, vault, settings, destPath, response.arrayBuffer);
+				const uploaded = await servers.store(destPath, response.arrayBuffer, kept ? "kept" : dest ? "outbox" : "none");
 				// Kept nowhere (no local archive, no server up): leave it for the next scan.
 				if (!dest && uploaded === 0) return "failed-transient";
 				return "downloaded";
@@ -93,7 +95,7 @@ function rejectAfter<T>(ms: number): Promise<T> {
 	return new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout ${ms}ms`)), ms));
 }
 
-async function writeFile(
+export async function writeFile(
 	{ store, path }: { store: Store; path: string },
 	vault: Vault,
 	settings: ArchiveSettings,

@@ -1,7 +1,7 @@
 import { App, Notice, Setting } from "obsidian";
 import { ModuleSettingTab } from "../module";
 import type ArchiveRedirectPlugin from "./main";
-import { isExternalPath, normalizeServerUrl, type ArchiveMode, type ArchiveSource } from "./settings";
+import { isExternalPath, normalizeServerUrl, serverUrls, type ArchiveMode, type ArchiveSource } from "./settings";
 import { findStaleCentralArchives, reconcile } from "./reconcile.ts";
 import { t } from "../../i18n";
 
@@ -105,7 +105,7 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 				row.addExtraButton((b) =>
 					b.setIcon("trash").setTooltip(t("archive.tooltipRemove")).onClick(async () => {
 						sources.splice(i, 1);
-						delete this.plugin.settings.pendingUploads[source.url];
+						this.plugin.servers.forget(source.url);
 						await save();
 					}),
 				);
@@ -130,6 +130,18 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 					await save();
 				}),
 			);
+
+		if (serverUrls(sources).length > 0) {
+			new Setting(containerEl)
+				.setName(t("archive.settingKeepLocal"))
+				.setDesc(t("archive.settingKeepLocalDesc"))
+				.addToggle((toggle) =>
+					toggle.setValue(this.plugin.settings.keepLocalCopies).onChange(async (v) => {
+						this.plugin.settings.keepLocalCopies = v;
+						await this.plugin.saveSettings();
+					}),
+				);
+		}
 
 		const pending = this.plugin.servers.pendingCount();
 		if (pending > 0) {

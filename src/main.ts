@@ -11,6 +11,7 @@ import { MediaLocator } from './mediaLocator';
 import { TranscriptIndex } from './transcriptIndex';
 import { LinkMediaModal } from './linkMediaModal';
 import { Modules, ModuleState } from './modules';
+import type ArchiveRedirectPlugin from './modules/archive/main';
 import { applyServer, normalizeServer, type Source } from './utils/server';
 import { LibraryClient } from './library/client';
 import { Uploader } from './library/uploader';
@@ -508,18 +509,20 @@ export default class MediaTranscriptPlugin extends Plugin {
     const next = normalizeServer(url);
     const previous = this.settings.serverUrl;
     const archive = this.modules.settingsOf('archive');
+    // The archive's queue is kept on this device (see ArchiveServers).
+    const servers = (this.modules.loaded.get('archive') as ArchiveRedirectPlugin | undefined)?.servers;
     const result = applyServer({
       mediaUrls: this.settings.mediaUrls,
       sources: (archive.settings?.sources as Source[] | undefined) ?? null,
-      pendingUploads: (archive.settings?.pendingUploads as Record<string, string[]> | undefined) ?? null,
+      pendingUploads: servers?.queued() ?? null,
     }, previous, next);
     this.settings.mediaUrls = result.mediaUrls;
     this.settings.serverUrl = next;
     if (archive.settings && result.sources) {
       archive.settings.sources = result.sources;
-      archive.settings.pendingUploads = result.pendingUploads ?? {};
       await archive.save();
     }
+    if (servers && result.pendingUploads) servers.replaceQueue(result.pendingUploads);
     await this.saveSettings();
     this.mediaLocator.invalidate();
   }
