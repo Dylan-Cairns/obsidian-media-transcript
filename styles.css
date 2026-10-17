@@ -1220,3 +1220,7 @@ img.at-flash {
 .mo-lib-job-claimed {
   color: var(--text-accent);
 }
+
+.mo-lib-nobackup {
+  color: var(--text-warning);
+}

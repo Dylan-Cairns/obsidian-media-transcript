@@ -40,6 +40,9 @@ server, by folder, like a folder you can't run out of:
 - **Delete** it. It goes to the server's trash, with its transcripts, for 30 days; restore it
   from the *Trash* section at the bottom. Notes keep their links.
 
+Files the server's backup doesn't hold yet are marked *no backup yet* (the Media One server notes
+each file a backup has copied).
+
 **Upload new media to the server** (off by default) uploads a recording or video as soon as it
 is added to the vault, checked by sha256 on the server, so every device can play it. The file
 stays in the vault. Without a connection it waits, and is retried every 10 minutes. *Upload to

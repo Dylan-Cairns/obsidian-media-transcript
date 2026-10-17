@@ -9,6 +9,7 @@ export interface LibraryFile {
   names: string[];
   added?: string;
   renamed?: string;
+  backup?: Record<string, string>;   // where a backup holds it → since when
 }
 
 export interface Job {

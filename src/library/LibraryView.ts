@@ -138,6 +138,9 @@ export class LibraryView extends ItemView {
     if (this.plugin.app.vault.getAbstractFileByPath(f.vaultPath) instanceof TFile) {
       meta.createSpan({ cls: 'mo-lib-badge', text: 'on this device' });
     }
+    if (!f.backup || Object.keys(f.backup).length === 0) {
+      meta.createSpan({ cls: 'mo-lib-badge mo-lib-nobackup', text: 'no backup yet', attr: { title: 'Only on the server so far; the nightly backup copies it.' } });
+    }
     const job = this.jobsByPath.get(f.vaultPath);
     if (job && job.state !== 'done' && job.state !== 'canceled') {
       const label = job.state === 'queued' ? 'waiting to transcribe' : job.state === 'claimed' ? 'transcribing' : 'transcription failed';
