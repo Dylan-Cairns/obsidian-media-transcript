@@ -15,6 +15,7 @@ import { applyServer, normalizeServer, type Source } from './utils/server';
 import { LibraryClient } from './library/client';
 import { Uploader } from './library/uploader';
 import { LibraryView, VIEW_TYPE_LIBRARY } from './library/LibraryView';
+import { TranscriptSync } from './library/transcriptSync';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -46,6 +47,7 @@ export default class MediaTranscriptPlugin extends Plugin {
   modules!: Modules;
   library!: LibraryClient;
   uploader!: Uploader;
+  transcriptSync!: TranscriptSync;
   // The modules' part of data.json, kept beside the settings above.
   private moduleState: ModuleState = { modules: {}, enabledModules: {} };
   mediaLocator!: MediaLocator;
@@ -60,6 +62,8 @@ export default class MediaTranscriptPlugin extends Plugin {
     this.library = new LibraryClient(() => this.settings.serverUrl, () => this.app.vault.getName());
     this.uploader = new Uploader(this);
     this.uploader.start();
+    this.transcriptSync = new TranscriptSync(this);
+    this.transcriptSync.start();
     this.registerView(VIEW_TYPE_LIBRARY, leaf => new LibraryView(leaf, this));
     this.addRibbonIcon('library', 'Media library', () => { void this.openLibrary(); });
     this.addCommand({

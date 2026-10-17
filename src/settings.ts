@@ -22,6 +22,8 @@ export interface MediaTranscriptSettings {
   uploadNewMedia: boolean;
   // Vault paths waiting to be uploaded (no server or network when added).
   pendingUploads: string[];
+  // Server time up to which finished transcriptions were brought into the vault.
+  transcriptSyncSince: number;
 
   // ── Subtitle matching ────────────────────────────────────────────────────
   subtitleDirectory: string;
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   serverUrl: '',
   uploadNewMedia: false,
   pendingUploads: [],
+  transcriptSyncSince: 0,
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],

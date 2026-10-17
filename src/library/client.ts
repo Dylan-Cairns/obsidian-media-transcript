@@ -11,6 +11,20 @@ export interface LibraryFile {
   renamed?: string;
 }
 
+export interface Job {
+  id: number;
+  vault: string;
+  path: string;          // in the library
+  state: 'queued' | 'claimed' | 'done' | 'failed' | 'canceled';
+  outputs: string[];     // transcript files written beside the media
+  error?: string | null;
+  note?: string;
+  force?: boolean;       // asked for again: its transcripts replace the vault's
+  created: number;       // seconds since the epoch, server time
+  finished?: number | null;
+  changed: number;
+}
+
 export interface TrashItem {
   id: string;
   path: string;
@@ -44,6 +58,32 @@ export class LibraryClient {
   async trash(): Promise<TrashItem[]> {
     const r = await this.call('GET', `trash?vault=${encodeURIComponent(this.vault())}`);
     return (r.json as { trash: TrashItem[] }).trash;
+  }
+
+  /** Transcription jobs of this vault changed since `since` (server seconds), and the server's time now. */
+  async jobs(since?: number): Promise<{ jobs: Job[]; now: number }> {
+    const q = new URLSearchParams({ vault: this.vault() });
+    if (since !== undefined) q.set('since', String(since));
+    const r = await this.call('GET', `jobs?${q.toString()}`);
+    return r.json as { jobs: Job[]; now: number };
+  }
+
+  /** Ask for a transcription (again, with `force`, even if one exists). */
+  async transcribe(vaultPath: string, force: boolean): Promise<Job | null> {
+    const r = await this.call('POST', 'transcribe', JSON.stringify({ vault: this.vault(), path: vaultPath, force }), 'application/json');
+    return (r.json as { job: Job | null }).job;
+  }
+
+  /** A text file of this vault from the server (a transcript). */
+  async text(vaultPath: string): Promise<string> {
+    let r: RequestUrlResponse;
+    try {
+      r = await requestUrl({ url: this.url(vaultPath), throw: false });
+    } catch {
+      throw new LibraryError(0, 'The Media One server cannot be reached.');
+    }
+    if (r.status !== 200) throw new LibraryError(r.status, `HTTP ${r.status}`);
+    return r.text;
   }
 
   /** Store `data` at `vaultPath`. True if stored now, false if the server already had this file. */

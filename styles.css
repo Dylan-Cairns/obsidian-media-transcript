@@ -1212,3 +1212,11 @@ img.at-flash {
 .mo-lib-rename-input {
   width: 100%;
 }
+
+.mo-lib-job-failed {
+  color: var(--text-error);
+}
+
+.mo-lib-job-claimed {
+  color: var(--text-accent);
+}

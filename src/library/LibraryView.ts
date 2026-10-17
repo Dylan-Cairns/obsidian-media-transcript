@@ -1,6 +1,6 @@
 import { App, ItemView, Menu, Modal, Notice, Setting, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
-import type { LibraryFile, TrashItem } from './client';
+import type { Job, LibraryFile, TrashItem } from './client';
 import { deleteMedia, renameMedia, restoreMedia } from './actions';
 
 export const VIEW_TYPE_LIBRARY = 'media-one-library';
@@ -13,6 +13,7 @@ export const VIEW_TYPE_LIBRARY = 'media-one-library';
 export class LibraryView extends ItemView {
   private files: LibraryFile[] = [];
   private trashItems: TrashItem[] = [];
+  private jobsByPath = new Map<string, Job>();
   private filter = '';
   private error: string | null = null;
   private listEl!: HTMLElement;
@@ -65,7 +66,14 @@ export class LibraryView extends ItemView {
       this.trashItems = [];
     } else {
       try {
-        [this.files, this.trashItems] = await Promise.all([library.files(), library.trash()]);
+        const [files, trash, jobs] = await Promise.all([library.files(), library.trash(), library.jobs()]);
+        this.files = files;
+        this.trashItems = trash;
+        // The latest job of each file says whether it is being transcribed.
+        this.jobsByPath = new Map();
+        for (const j of jobs.jobs.sort((a, b) => a.created - b.created)) {
+          this.jobsByPath.set(j.path.slice(j.path.indexOf('/') + 1), j);
+        }
         this.error = null;
       } catch (e) {
         this.error = (e as Error).message;
@@ -130,6 +138,12 @@ export class LibraryView extends ItemView {
     if (this.plugin.app.vault.getAbstractFileByPath(f.vaultPath) instanceof TFile) {
       meta.createSpan({ cls: 'mo-lib-badge', text: 'on this device' });
     }
+    const job = this.jobsByPath.get(f.vaultPath);
+    if (job && job.state !== 'done' && job.state !== 'canceled') {
+      const label = job.state === 'queued' ? 'waiting to transcribe' : job.state === 'claimed' ? 'transcribing' : 'transcription failed';
+      const badge = meta.createSpan({ cls: `mo-lib-badge mo-lib-job-${job.state}`, text: label });
+      if (job.error) badge.setAttr('title', job.error);
+    }
     main.addEventListener('click', () => { void this.play(f, row); });
 
     const actions = row.createDiv('mo-lib-actions');
@@ -144,6 +158,7 @@ export class LibraryView extends ItemView {
       const menu = new Menu();
       menu.addItem(i => i.setTitle('Play').setIcon('play').onClick(() => { void this.play(f, row); }));
       menu.addItem(i => i.setTitle('Rename or move…').setIcon('pencil').onClick(() => this.askRename(f)));
+      menu.addItem(i => i.setTitle('Transcribe again').setIcon('file-audio').onClick(() => { void this.transcribe(f); }));
       menu.addItem(i => i.setTitle('Copy embed').setIcon('copy').onClick(() => {
         void navigator.clipboard.writeText(`![[${nameOf(f.vaultPath)}]]`);
         new Notice('Copied');
@@ -199,6 +214,16 @@ export class LibraryView extends ItemView {
         }
         await this.refresh();
       }).open();
+  }
+
+  private async transcribe(f: LibraryFile): Promise<void> {
+    try {
+      const job = await this.plugin.library.transcribe(f.vaultPath, true);
+      new Notice(job ? `${nameOf(f.vaultPath)} is waiting to be transcribed` : 'Nothing to transcribe');
+    } catch (e) {
+      new Notice(`Could not ask for a transcription: ${(e as Error).message}`);
+    }
+    await this.refresh();
   }
 
   private async restore(t: TrashItem): Promise<void> {

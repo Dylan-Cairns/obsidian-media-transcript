@@ -45,6 +45,13 @@ is added to the vault, checked by sha256 on the server, so every device can play
 stays in the vault. Without a connection it waits, and is retried every 10 minutes. *Upload to
 Media One server* in a media file's menu does it by hand.
 
+**Transcription.** A server with a job queue (the Media One server) transcribes what is uploaded:
+a worker (local-asr, speech-to-text on an Apple Silicon Mac) takes the job, and Media One brings the
+transcript into the vault beside the media, where it is searched and synced like a note. The
+library shows what is waiting or being transcribed; *Transcribe again* in a file's menu asks for a
+new one. A transcript already in the vault is never overwritten. On a phone, a new transcript is
+left for half an hour to a computer that may be writing it too.
+
 The server needs the library API (`/api/files`, `/api/upload`, `/api/rename`, `/api/delete`,
 `/api/restore`, `/api/trash`); a plain file server only offers playback.
 
