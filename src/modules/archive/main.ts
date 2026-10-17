@@ -11,6 +11,7 @@ import { MigrateModal } from "./migrate-modal";
 import { findStaleCentralArchives, reconcile } from "./reconcile.ts";
 import { ArchiveServers } from "./servers";
 import { storeFor } from "./store";
+import { t } from "../../i18n";
 
 export default class ArchiveRedirectPlugin extends ModulePlugin {
 	settings!: ArchiveSettings;
@@ -40,19 +41,19 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 
 		this.addCommand({
 			id: "archive-scan-vault",
-			name: "Scan vault & archive remote resources",
+			name: t("archive.commandScanVault"),
 			callback: () => this.scanAll(),
 		});
 
 		this.addCommand({
 			id: "archive-migrate-sibling-to-central",
-			name: "Migrate sibling archives to central",
+			name: t("archive.commandMigrate"),
 			callback: () => this.openMigrateModal(),
 		});
 
 		this.addCommand({
 			id: "archive-reconcile-stale-central",
-			name: "Reconcile stale central archive folders",
+			name: t("archive.commandReconcile"),
 			callback: () => this.reconcileStaleArchives(),
 		});
 
@@ -62,7 +63,7 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 	/** Migrate and reconcile move folders within the vault, so they need the central path there too. */
 	centralPathInVault(): boolean {
 		if (!isExternalPath(this.settings.centralArchivePath)) return true;
-		new Notice("The central archive path is outside the vault; move files there yourself.");
+		new Notice(t("archive.noticeCentralOutsideVault"));
 		return false;
 	}
 
@@ -76,7 +77,7 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 		const target = this.settings.centralArchivePath;
 		const stale = findStaleCentralArchives(this.app, target);
 		if (stale.length === 0) {
-			new Notice("No stale central archives found.");
+			new Notice(t("archive.noticeNoStale"));
 			return;
 		}
 		let okCount = 0;
@@ -90,8 +91,8 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 				failures.push(`${s.folderPath} (${r.reason})${tail}`);
 			}
 		}
-		const summary = `Reconciled ${okCount}/${stale.length} stale archive(s) → ${target}.` +
-			(failures.length ? ` Failures: ${failures.join("; ")}` : "");
+		const summary = t("archive.noticeReconciled", { ok: okCount, total: stale.length, target }) +
+			(failures.length ? t("archive.noticeReconcileFailures", { failures: failures.join("; ") }) : "");
 		new Notice(summary);
 	}
 
@@ -129,9 +130,9 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 			.getMarkdownFiles()
 			.filter((f) => isInScope(f.path, this.settings.includedPaths));
 		const scopeNote = this.settings.includedPaths.length
-			? ` (scope: ${this.settings.includedPaths.join(", ")})`
+			? t("archive.noticeScanScope", { paths: this.settings.includedPaths.join(", ") })
 			: "";
-		new Notice(`Archive scan: ${files.length} files${scopeNote}…`);
+		new Notice(t("archive.noticeScanStart", { count: files.length, scope: scopeNote }));
 		let totalOk = 0;
 		let totalTransient = 0;
 		let totalPermanent = 0;
@@ -149,7 +150,7 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 			}
 		}
 		new Notice(
-			`Archive scan done: ${totalOk} downloaded, ${totalTransient} transient fails, ${totalPermanent} permanent fails.`,
+			t("archive.noticeScanDone", { ok: totalOk, transient: totalTransient, permanent: totalPermanent }),
 		);
 	}
 

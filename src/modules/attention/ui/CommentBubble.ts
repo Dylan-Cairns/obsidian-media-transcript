@@ -1,6 +1,7 @@
 import { Annotation } from '../model';
 import { formatWhen } from './time';
 import { asEl } from '../dom';
+import { t } from '../../../i18n';
 
 /**
  * What you get when you click a mark: its comment, when it caught you, and the
@@ -33,11 +34,11 @@ export class CommentBubble {
 
     const body = annotation.body;
     if (body && body.trim().length > 0) el.createDiv('at-bubble-body').setText(body);
-    else el.createDiv('at-bubble-empty').setText('No comment yet.');
+    else el.createDiv('at-bubble-empty').setText(t('attention.bubbleNoComment'));
 
     const hits = annotation.hits;
     const times = el.createDiv('at-bubble-hits');
-    times.createSpan({ cls: 'at-hit-count', text: hits.length === 1 ? 'Marked once' : `Marked ${hits.length}×` });
+    times.createSpan({ cls: 'at-hit-count', text: hits.length === 1 ? t('attention.bubbleMarkedOnce') : t('attention.bubbleMarkedTimes', { count: hits.length }) });
     // Newest first: the most recent time it landed is the one you're asking about.
     for (const at of [...hits].reverse()) {
       times.createDiv('at-hit-time').setText(formatWhen(at, this.timeFormat));
@@ -49,9 +50,9 @@ export class CommentBubble {
       if (warn) b.addClass('mod-warning');
       b.addEventListener('click', () => { fn(); this.hide(); });
     };
-    add(body ? 'Edit' : 'Comment', actions.onEdit);
-    add('Mark again', actions.onMarkAgain);
-    add('Remove', actions.onRemove, true);
+    add(body ? t('attention.bubbleEdit') : t('attention.bubbleComment'), actions.onEdit);
+    add(t('attention.bubbleMarkAgain'), actions.onMarkAgain);
+    add(t('attention.bubbleRemove'), actions.onRemove, true);
 
     document.body.appendChild(el);
     this.el = el;

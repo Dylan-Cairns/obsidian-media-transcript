@@ -1,6 +1,7 @@
 import { Annotation, isComment } from '../model';
 import { imageTargetOf, imageMatches, srcHint } from '../anchor/imageAnchor';
 import { asEl, asImg } from '../dom';
+import { t } from '../../../i18n';
 
 /**
  * Outline the pictures that have been marked.
@@ -39,7 +40,7 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
     // Hover, not click: clicking an image is Obsidian's zoom, and a marked
     // picture should still zoom like any other.
     const body = hit.annotation.body;
-    img.setAttribute('title', body && body.trim() ? body : 'Marked');
+    img.setAttribute('title', body && body.trim() ? body : t('attention.imageMarked'));
   }
 }
 

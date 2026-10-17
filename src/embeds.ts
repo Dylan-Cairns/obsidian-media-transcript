@@ -5,6 +5,7 @@ import { trackMarker } from './utils/transcriptSource';
 import { parseSubtitle } from './utils/subtitleParser';
 import { parseTimeFragment } from './utils/timeFragment';
 import { subtitleBaseName } from './utils/mediaMatch';
+import { t } from './i18n';
 
 // Embeds have their own registry (extension → component factory), separate
 // from the view registry. Undocumented; every access is guarded so a change
@@ -160,10 +161,10 @@ export class TranscriptCards {
     head.createSpan({ cls: 'mt-card-title', text: subtitleBaseName(transcript.name) });
     const btn = head.createEl('button', {
       cls: 'mt-embed-btn',
-      attr: { 'aria-label': 'Open the transcript beside this note' },
+      attr: { 'aria-label': t('core.openTranscriptBeside') },
     });
     setIcon(btn.createSpan('mt-embed-btn-icon'), 'captions');
-    btn.createSpan({ text: 'Transcript' });
+    btn.createSpan({ text: t('core.transcriptButton') });
 
     const body = card.createDiv('mt-card-body');
 
@@ -187,12 +188,12 @@ export class TranscriptCards {
     // way. Retry looks again on demand.
     const load = async () => {
       body.empty();
-      const status = body.createSpan({ cls: 'mt-card-status', text: 'Looking for audio/video…' });
+      const status = body.createSpan({ cls: 'mt-card-status', text: t('core.lookingForMedia') });
       const { media } = await this.plugin.mediaLocator.resolveForSubtitle(transcript);
       if (!card.isConnected) return;
       if (!media) {
-        status.setText('No audio/video found · transcript only · ');
-        const retry = status.createEl('a', { cls: 'mt-card-retry', text: 'Retry', attr: { href: '#' } });
+        status.setText(t('core.noMediaTranscriptOnly'));
+        const retry = status.createEl('a', { cls: 'mt-card-retry', text: t('core.retry'), attr: { href: '#' } });
         retry.addEventListener('click', e => {
           e.preventDefault();
           e.stopPropagation();

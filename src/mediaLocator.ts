@@ -1,6 +1,7 @@
 import { App, Platform, TFile, normalizePath, requestUrl } from 'obsidian';
 import type { MediaTranscriptSettings } from './settings';
 import { findMediaForSubtitle } from './utils/subtitleFinder';
+import { t } from './i18n';
 import { RemoteIndex, nameKey, parseRemoteIndex, remotePathUrl } from './utils/transcriptSource';
 import {
   MediaEntry,
@@ -153,7 +154,7 @@ export class MediaLocator {
     const fromServers = async (): Promise<MediaLookup | null> => {
       for (const base of settings.mediaUrls) {
         const { url, twin, reachable } = await this.findRemote(base, candidates, source);
-        searched.push(reachable ? base : `${base} (unreachable)`);
+        searched.push(reachable ? base : t('core.searchedUnreachable', { place: base }));
         if (url) return { media: { ...this.remoteMedia(url), audioTwin: twin ? this.remoteMedia(twin) : null }, searched };
       }
       return null;
@@ -166,7 +167,7 @@ export class MediaLocator {
     }
 
     const dir = subtitle.parent?.path ?? '';
-    searched.push(`same folder (${dir || '/'})`);
+    searched.push(t('core.searchedSameFolder', { dir: dir || '/' }));
     const siblings = this.app.vault.getFiles().filter(f => (f.parent?.path ?? '') === dir)
       .map(f => ({ basename: f.basename, extension: f.extension, ref: f }));
     const sibling = source ? pick(siblings) : findMediaForSubtitle(subtitle, this.app.vault, settings);
@@ -174,7 +175,7 @@ export class MediaLocator {
 
     // Named media elsewhere in the vault — the transcript was moved, not its media.
     if (source) {
-      searched.push(`vault (${source})`);
+      searched.push(t('core.searchedVault', { name: source }));
       const elsewhere = this.app.metadataCache.getFirstLinkpathDest(source, subtitle.path);
       if (elsewhere && isMedia(elsewhere.extension)) return { media: this.vaultMediaWithTwin(elsewhere), searched };
     }
@@ -188,7 +189,7 @@ export class MediaLocator {
       }
 
       if (!Platform.isDesktopApp) {
-        searched.push(`${folder} (skipped: desktop only)`);
+        searched.push(t('core.searchedDesktopOnly', { place: folder }));
         continue;
       }
       let index = await this.indexOf(folder);
@@ -197,7 +198,7 @@ export class MediaLocator {
         index = await this.indexOf(folder, true);
         path = index.entries ? pick(index.entries) : null;
       }
-      searched.push(index.entries ? folder : `${folder} (unavailable)`);
+      searched.push(index.entries ? folder : t('core.searchedUnavailable', { place: folder }));
       if (path) {
         const twin = this.twinName(path, (_, sibling) => index.entries?.find(e => e.ref === sibling)?.ref ?? null);
         return { media: { ...this.externalMedia(path), audioTwin: twin ? this.externalMedia(twin) : null }, searched };

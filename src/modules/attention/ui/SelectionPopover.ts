@@ -1,3 +1,5 @@
+import { t } from '../../../i18n';
+
 /**
  * The little bar that appears over a selection.
  *
@@ -35,11 +37,11 @@ export class SelectionPopover {
       });
     };
 
-    if (actions.onMark) add('Mark', 'Mark this', actions.onMark, 'at-pop-btn at-pop-mark');
-    if (actions.onMarkAgain) add('＋', 'Mark again — it caught you once more', actions.onMarkAgain);
-    add('💬', 'Add or edit a comment', actions.onComment);
-    if (actions.onRemove) add('✕', 'Remove mark', actions.onRemove);
-    if (actions.onZoom) add('🔍', 'Open the picture', actions.onZoom);
+    if (actions.onMark) add(t('attention.popMark'), t('attention.popMarkTitle'), actions.onMark, 'at-pop-btn at-pop-mark');
+    if (actions.onMarkAgain) add('＋', t('attention.tooltipMarkAgain'), actions.onMarkAgain);
+    add('💬', t('attention.popCommentTitle'), actions.onComment);
+    if (actions.onRemove) add('✕', t('attention.popRemoveTitle'), actions.onRemove);
+    if (actions.onZoom) add('🔍', t('attention.popZoomTitle'), actions.onZoom);
 
     document.body.appendChild(el);
     this.el = el;

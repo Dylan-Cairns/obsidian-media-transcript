@@ -16,6 +16,7 @@ import { LibraryClient } from './library/client';
 import { Uploader } from './library/uploader';
 import { LibraryView, VIEW_TYPE_LIBRARY } from './library/LibraryView';
 import { TranscriptSync } from './library/transcriptSync';
+import { t } from './i18n';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -68,15 +69,15 @@ export default class MediaTranscriptPlugin extends Plugin {
     this.transcriptSync = new TranscriptSync(this);
     this.transcriptSync.start();
     this.registerView(VIEW_TYPE_LIBRARY, leaf => new LibraryView(leaf, this));
-    this.addRibbonIcon('library', 'Media library', () => { void this.openLibrary(); });
+    this.addRibbonIcon('library', t('core.ribbonLibrary'), () => { void this.openLibrary(); });
     this.addCommand({
       id: 'open-media-library',
-      name: 'Open media library',
+      name: t('core.cmdOpenLibrary'),
       callback: () => { void this.openLibrary(); },
     });
     this.addCommand({
       id: 'upload-current-media',
-      name: 'Upload current media file to the server',
+      name: t('core.cmdUploadCurrent'),
       checkCallback: (checking: boolean) => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || !this.isMedia(file) || !this.library.configured) return false;
@@ -121,7 +122,7 @@ export default class MediaTranscriptPlugin extends Plugin {
         if (file instanceof TFile && (this.isMedia(file) || this.isSubtitle(file))) {
           menu.addItem(item =>
             item
-              .setTitle('Open in Media One')
+              .setTitle(t('core.menuOpenInMediaOne'))
               .setIcon('play-circle')
               .onClick(() => { void this.openInView(file); }),
           );
@@ -129,7 +130,7 @@ export default class MediaTranscriptPlugin extends Plugin {
         if (file instanceof TFile && this.isMedia(file) && this.library.configured) {
           menu.addItem(item =>
             item
-              .setTitle('Upload to Media One server')
+              .setTitle(t('core.menuUploadToServer'))
               .setIcon('upload-cloud')
               .onClick(() => { void this.uploadNow(file); }),
           );
@@ -139,7 +140,7 @@ export default class MediaTranscriptPlugin extends Plugin {
 
     this.addCommand({
       id: 'open-current-media-file',
-      name: 'Open current media file in transcript view',
+      name: t('core.cmdOpenCurrentMedia'),
       checkCallback: (checking: boolean) => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || (!this.isMedia(file) && !this.isSubtitle(file))) {
@@ -153,7 +154,7 @@ export default class MediaTranscriptPlugin extends Plugin {
     // Focus the transcript search box (bind a hotkey to it if you like).
     this.addCommand({
       id: 'search-transcript',
-      name: 'Search transcript',
+      name: t('core.cmdSearchTranscript'),
       checkCallback: (checking: boolean) => {
         const view = this.app.workspace.getActiveViewOfType(MediaTranscriptView);
         if (!view) return false;
@@ -166,7 +167,7 @@ export default class MediaTranscriptPlugin extends Plugin {
     // `[[talk.m4a#t=83|1:23]]`. Clicking it later jumps back there.
     this.addCommand({
       id: 'insert-timestamp-link',
-      name: 'Insert link to current playback time',
+      name: t('core.cmdInsertTimestampLink'),
       editorCheckCallback: (checking, editor, ctx) => {
         const view = this.transcriptViews().find(v => v.getCurrentTime() !== null);
         if (!view) return false;
@@ -181,7 +182,7 @@ export default class MediaTranscriptPlugin extends Plugin {
     // a format with no room to say — point it at the right file by hand.
     this.addCommand({
       id: 'link-transcript-media',
-      name: 'Link transcript to its audio/video',
+      name: t('core.cmdLinkTranscriptMedia'),
       checkCallback: (checking: boolean) => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || !this.isSubtitle(file)) return false;
@@ -232,7 +233,7 @@ export default class MediaTranscriptPlugin extends Plugin {
   async linkMedia(transcript: TFile) {
     const choices = await this.mediaLocator.listAll();
     if (choices.length === 0) {
-      new Notice('No audio/video found in the vault, media folders or on a server.');
+      new Notice(t('core.noMediaAnywhere'));
       return;
     }
     choices.sort((a, b) => a.name.localeCompare(b.name));
@@ -278,26 +279,28 @@ export default class MediaTranscriptPlugin extends Plugin {
     await this.transcripts.whenReady();
     const tracks = new Set<TFile>(this.transcripts.transcriptsFor(oldName));
     const searchDir = this.settings.subtitleDirectory.trim() || dir;
-    for (const t of findSubtitleTracks(oldBase, searchDir, this.app.vault)) tracks.add(t.file);
+    for (const track of findSubtitleTracks(oldBase, searchDir, this.app.vault)) tracks.add(track.file);
 
     let renamed = 0;
     const blocked: string[] = [];
-    for (const t of tracks) {
-      if ((await this.transcripts.sourceOf(t))?.toLowerCase() === oldName.toLowerCase()) {
-        await this.transcripts.setSource(t, newName);
+    for (const tr of tracks) {
+      if ((await this.transcripts.sourceOf(tr))?.toLowerCase() === oldName.toLowerCase()) {
+        await this.transcripts.setSource(tr, newName);
       }
-      if (!t.name.startsWith(oldBase + '.')) continue; // named its own way: leave the name
-      const target = normalizePath(`${t.parent?.path ?? ''}/${newBase}${t.name.slice(oldBase.length)}`);
+      if (!tr.name.startsWith(oldBase + '.')) continue; // named its own way: leave the name
+      const target = normalizePath(`${tr.parent?.path ?? ''}/${newBase}${tr.name.slice(oldBase.length)}`);
       if (this.app.vault.getAbstractFileByPath(target)) {
-        blocked.push(t.name);
+        blocked.push(tr.name);
         continue;
       }
-      await this.app.fileManager.renameFile(t, target);
+      await this.app.fileManager.renameFile(tr, target);
       renamed++;
     }
-    if (renamed > 0) new Notice(`Renamed ${renamed} transcript${renamed > 1 ? 's' : ''} to match ${newName}`);
+    if (renamed > 0) {
+      new Notice(t(renamed > 1 ? 'core.renamedTranscriptsMany' : 'core.renamedTranscriptsOne', { n: renamed, name: newName }));
+    }
     if (blocked.length > 0) {
-      new Notice(`Kept ${blocked.join(', ')}: a file with the new name already exists.`);
+      new Notice(t('core.keptTranscripts', { names: blocked.join(', ') }));
     }
   }
 
@@ -364,10 +367,10 @@ export default class MediaTranscriptPlugin extends Plugin {
     containerEl.addClass('mt-embed');
     const btn = containerEl.createEl('button', {
       cls: 'mt-embed-btn',
-      attr: { 'aria-label': 'Open the transcript beside this note' },
+      attr: { 'aria-label': t('core.openTranscriptBeside') },
     });
     setIcon(btn.createSpan('mt-embed-btn-icon'), 'captions');
-    btn.createSpan({ text: 'Transcript' });
+    btn.createSpan({ text: t('core.transcriptButton') });
 
     // Live Preview treats a press inside an embed as "edit the source".
     btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); });
@@ -496,8 +499,8 @@ export default class MediaTranscriptPlugin extends Plugin {
 
   async uploadNow(file: TFile) {
     const outcome = await this.uploader.uploadOne(file.path);
-    if (outcome === 'retry') new Notice(`Could not upload ${file.name} now; the server cannot be reached.`);
-    else new Notice(`${file.name} is on the Media One server`);
+    if (outcome === 'retry') new Notice(t('core.uploadUnreachable', { name: file.name }));
+    else new Notice(t('core.uploadDone', { name: file.name }));
   }
 
   /** Point Media One at a server (or at none, with ''), replacing the previous one everywhere. */

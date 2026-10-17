@@ -11,6 +11,7 @@ import { paintQuote } from '../paintQuote';
 import { asEl, elementOf } from '../../dom';
 import { ownerOfMarks } from './owner';
 import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
+import { t } from '../../../../i18n';
 
 /** Announced by obsidian-media-transcript whenever it rebuilds its transcript. */
 const TRANSCRIPT_RENDERED = 'mt:transcript-rendered';
@@ -203,7 +204,7 @@ export class TranscriptHost {
     if (at < 0) {
       // The selection runs across two lines; there is no single segment to
       // anchor it to, and splitting it silently would be worse than refusing.
-      new Notice('Attention: select within a single transcript line.');
+      new Notice(t('attention.noticeSingleLine'));
       return null;
     }
 
@@ -241,16 +242,16 @@ export class TranscriptHost {
       const owner = this.panelOf(hit)?.owner;
       const id = hit.dataset.atId;
       if (!owner || !id) return;
-      menu.addItem(i => i.setTitle('Edit comment…').setIcon('message-square')
+      menu.addItem(i => i.setTitle(t('attention.menuEditComment')).setIcon('message-square')
         .onClick(() => { void this.editComment(owner, id); }));
-      menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
+      menu.addItem(i => i.setTitle(t('attention.menuRemoveMark')).setIcon('trash').setWarning(true)
         .onClick(() => { void this.store.remove(owner, id); }));
     } else {
       const captured = this.capture();
       if (!captured) return;
-      menu.addItem(i => i.setTitle('Mark').setIcon('highlighter')
+      menu.addItem(i => i.setTitle(t('attention.menuMark')).setIcon('highlighter')
         .onClick(() => { void this.mark(captured.owner, captured.anchor, null); }));
-      menu.addItem(i => i.setTitle('Comment…').setIcon('message-square').onClick(() => {
+      menu.addItem(i => i.setTitle(t('attention.menuComment')).setIcon('message-square').onClick(() => {
         new CommentModal(this.app, captured.anchor.quote, '', body => {
           void this.mark(captured.owner, captured.anchor, body || null);
         }).open();
@@ -278,7 +279,7 @@ export class TranscriptHost {
 
   private async markAgain(targetPath: string, id: string): Promise<void> {
     const updated = await this.store.markAgain(targetPath, id);
-    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
+    if (updated) new Notice(t('attention.noticeMarkedTimes', { count: updated.hits.length }));
   }
 
   private async editComment(owner: string, id: string): Promise<void> {
@@ -292,6 +293,6 @@ export class TranscriptHost {
 
   private async mark(owner: string, anchor: TranscriptAnchor, body: string | null): Promise<void> {
     const { repeat, annotation } = await this.store.mark(owner, anchor, body);
-    if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
+    if (repeat) new Notice(t('attention.noticeMarkedTimes', { count: annotation.hits.length }));
   }
 }

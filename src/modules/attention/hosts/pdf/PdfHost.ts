@@ -10,6 +10,7 @@ import { asEl, elementOf } from '../../dom';
 import { describePdf, itemTexts, resolveSpan, spanText, textInRect } from '../../anchor/pdfText';
 import { readable, readablePdf } from '../../anchor/cjk';
 import { childOf, PageView, PdfChild, PdfPlus, pdfPlus, Rect, textLayerOf, TextLayerInfo } from './pdfPlus';
+import { t } from '../../../../i18n';
 
 /**
  * Marks on PDFs, drawn and selected through PDF++.
@@ -358,19 +359,19 @@ export class PdfHost {
   private addMenuItems(menu: Menu): void {
     const hit = this.contextAt && this.markAt(this.contextAt.x, this.contextAt.y);
     if (hit) {
-      menu.addItem(i => i.setSection('attention').setTitle('Edit comment…').setIcon('message-square')
+      menu.addItem(i => i.setSection('attention').setTitle(t('attention.menuEditComment')).setIcon('message-square')
         .onClick(() => { void this.editComment(hit.path, hit.id); }));
-      menu.addItem(i => i.setSection('attention').setTitle('Mark again').setIcon('highlighter')
+      menu.addItem(i => i.setSection('attention').setTitle(t('attention.menuMarkAgain')).setIcon('highlighter')
         .onClick(() => { void this.markAgain(hit.path, hit.id); }));
-      menu.addItem(i => i.setSection('attention').setTitle('Remove mark').setIcon('trash').setWarning(true)
+      menu.addItem(i => i.setSection('attention').setTitle(t('attention.menuRemoveMark')).setIcon('trash').setWarning(true)
         .onClick(() => { void this.store.remove(hit.path, hit.id); }));
       return;
     }
     const captured = this.capture();
     if (!captured) return;
-    menu.addItem(i => i.setSection('attention').setTitle('Mark').setIcon('highlighter')
+    menu.addItem(i => i.setSection('attention').setTitle(t('attention.menuMark')).setIcon('highlighter')
       .onClick(() => { void this.mark(captured.file, captured.anchor, null); }));
-    menu.addItem(i => i.setSection('attention').setTitle('Comment…').setIcon('message-square')
+    menu.addItem(i => i.setSection('attention').setTitle(t('attention.menuComment')).setIcon('message-square')
       .onClick(() => this.comment(captured.file, captured.anchor)));
   }
 
@@ -417,13 +418,13 @@ export class PdfHost {
 
   private async markAgain(path: string, id: string): Promise<void> {
     const updated = await this.store.markAgain(path, id);
-    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
+    if (updated) new Notice(t('attention.noticeMarkedTimes', { count: updated.hits.length }));
   }
 
   private async mark(file: TFile, anchor: PdfAnchor, body: string | null): Promise<void> {
     window.getSelection()?.removeAllRanges();
     const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
-    if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
+    if (repeat) new Notice(t('attention.noticeMarkedTimes', { count: annotation.hits.length }));
   }
 
   private async find(path: string, id: string): Promise<Annotation | undefined> {

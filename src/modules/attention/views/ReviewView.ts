@@ -2,7 +2,7 @@ import { App, ItemView, Menu, Notice, WorkspaceLeaf, TFile, MarkdownRenderer } f
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked, pdfPage } from '../model';
-import { Sort, SORT_LABELS, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
+import { Sort, sortLabels, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
 import { inDocumentOrder } from '../store/documentOrder';
 import { classify } from '../store/orphans';
 import { transcludedNotes } from '../store/transclusions';
@@ -17,15 +17,16 @@ import { claimMenu, onLongPress } from '../ui/touch';
 import { describeMark } from '../store/describeMark';
 import { readable, readablePdf } from '../anchor/cjk';
 import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
+import { t } from '../../../i18n';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
-const BUCKET_LABELS: Record<Bucket, string> = {
-  today: 'Today',
-  week: 'This week',
-  month: 'This month',
-  older: 'Earlier',
-};
+const bucketLabels = (): Record<Bucket, string> => ({
+  today: t('attention.bucketToday'),
+  week: t('attention.bucketWeek'),
+  month: t('attention.bucketMonth'),
+  older: t('attention.bucketOlder'),
+});
 
 /**
  * Two ways of looking at the same annotations.
@@ -58,7 +59,7 @@ export class ReviewView extends ItemView {
   }
 
   getViewType() { return VIEW_TYPE_REVIEW; }
-  getDisplayText() { return 'Attention'; }
+  getDisplayText() { return t('attention.viewTitle'); }
   getIcon() { return 'highlighter'; }
 
   async onOpen() {
@@ -101,10 +102,10 @@ export class ReviewView extends ItemView {
         void this.render();
       });
     };
-    tab('This note', 'file');
-    tab('All', 'all');
+    tab(t('attention.tabThisNote'), 'file');
+    tab(t('attention.tabAll'), 'all');
 
-    const resurface = header.createEl('button', { text: 'Resurface', cls: 'at-btn' });
+    const resurface = header.createEl('button', { text: t('attention.buttonResurface'), cls: 'at-btn' });
     if (this.resurfaced) resurface.addClass('is-active');
     resurface.addEventListener('click', () => {
       this.resurfaced = this.resurfaced
@@ -119,8 +120,9 @@ export class ReviewView extends ItemView {
   private renderSortControl(root: HTMLElement): void {
     const bar = root.createDiv('at-sortbar');
     const select = bar.createEl('select', { cls: 'at-sort dropdown' });
+    const labels = sortLabels();
     for (const s of sortsFor(this.lens)) {
-      select.createEl('option', { text: SORT_LABELS[s], attr: { value: s } });
+      select.createEl('option', { text: labels[s], attr: { value: s } });
     }
     select.value = this.sort;
     select.addEventListener('change', () => {
@@ -134,7 +136,7 @@ export class ReviewView extends ItemView {
   private async renderFile(root: HTMLElement, seq: number): Promise<void> {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      this.empty(root, 'No note open.');
+      this.empty(root, t('attention.emptyNoNote'));
       return;
     }
 
@@ -162,7 +164,7 @@ export class ReviewView extends ItemView {
     if (seq !== this.generation) return;
 
     if (ordered.length > 0) {
-      root.createDiv('at-bucket-title').setText(`${ordered.length} in this note`);
+      root.createDiv('at-bucket-title').setText(t('attention.countInNote', { count: ordered.length }));
       for (const a of ordered) this.renderEntry(root, a, file.path);
     }
 
@@ -171,7 +173,7 @@ export class ReviewView extends ItemView {
     // being able to draw them.
     if (lost.length > 0) {
       root.createDiv('at-bucket-title at-lost-title')
-        .setText(`${lost.length} lost — the text they marked is gone`);
+        .setText(t('attention.countLost', { count: lost.length }));
       for (const a of lost) this.renderEntry(root, a, file.path, true);
     }
 
@@ -183,13 +185,13 @@ export class ReviewView extends ItemView {
       const theirs = (await this.plugin.store.get(note.path)).annotations;
       if (seq !== this.generation) return;
       if (theirs.length === 0) continue;
-      if (embedded === 0) root.createDiv('at-bucket-title').setText('From embedded notes');
+      if (embedded === 0) root.createDiv('at-bucket-title').setText(t('attention.fromEmbedded'));
       embedded += theirs.length;
       for (const a of theirs) this.renderEntry(root, a, note.path, false, true);
     }
 
     if (ordered.length === 0 && lost.length === 0 && embedded === 0) {
-      this.empty(root, `Nothing marked in “${file.basename}”.`);
+      this.empty(root, t('attention.emptyNothingInNote', { name: file.basename }));
     }
   }
 
@@ -198,7 +200,7 @@ export class ReviewView extends ItemView {
   private renderAll(root: HTMLElement): void {
     const all = this.plugin.index.all();
     if (all.length === 0) {
-      this.empty(root, 'Nothing marked yet. Select text in a note to mark it.');
+      this.empty(root, t('attention.emptyNothingYet'));
       return;
     }
 
@@ -206,16 +208,17 @@ export class ReviewView extends ItemView {
     // and still getting time headings would be answering a different question.
     if (this.sort !== 'recent') {
       const sorted = sortAnnotations(all, this.sort);
-      root.createDiv('at-bucket-title').setText(`${sorted.length} marked`);
+      root.createDiv('at-bucket-title').setText(t('attention.countMarked', { count: sorted.length }));
       for (const e of sorted) this.renderEntry(root, e.annotation, e.targetPath);
       return;
     }
 
     const buckets = this.plugin.index.buckets();
+    const labels = bucketLabels();
     for (const key of BUCKET_ORDER) {
       const entries = buckets[key];
       if (entries.length === 0) continue;
-      root.createDiv('at-bucket-title').setText(`${BUCKET_LABELS[key]} · ${entries.length}`);
+      root.createDiv('at-bucket-title').setText(`${labels[key]} · ${entries.length}`);
       for (const e of entries) this.renderEntry(root, e.annotation, e.targetPath);
     }
   }
@@ -310,7 +313,7 @@ export class ReviewView extends ItemView {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
     }
     if (annotation.anchor.kind === 'pdf') {
-      left.createSpan({ text: `p. ${pdfPage(annotation.anchor)}`, cls: 'at-time' });
+      left.createSpan({ text: t('attention.pageShort', { page: pdfPage(annotation.anchor) }), cls: 'at-time' });
     }
 
     const right = meta.createDiv('at-meta-right');
@@ -339,15 +342,15 @@ export class ReviewView extends ItemView {
     // Re-marking from the list: the passage came back to mind, which is worth
     // recording even when you aren't looking at it in the note.
     if (lost) {
-      act('⚲', 'Re-attach: select the text in the note first',
+      act('⚲', t('attention.tooltipReattach'),
           () => { void this.reattach(targetPath, annotation); });
     } else {
-      act('＋', 'Mark again — it caught you once more',
+      act('＋', t('attention.tooltipMarkAgain'),
           () => { void this.markAgain(targetPath, annotation); });
     }
-    act('💬', isComment(annotation) ? 'Edit comment' : 'Add a comment',
+    act('💬', isComment(annotation) ? t('attention.tooltipEditComment') : t('attention.tooltipAddComment'),
         () => this.editComment(targetPath, annotation));
-    act('✕', 'Remove this mark',
+    act('✕', t('attention.tooltipRemoveThisMark'),
         () => { void this.plugin.store.remove(targetPath, annotation.id); }, true);
 
     // A lost mark has nowhere to jump to; clicking it would do nothing.
@@ -369,19 +372,19 @@ export class ReviewView extends ItemView {
 
   private entryMenu(at: { x: number; y: number }, annotation: Annotation, targetPath: string): void {
     const menu = new Menu();
-    menu.addItem(i => i.setTitle('Go to').setIcon('arrow-right')
+    menu.addItem(i => i.setTitle(t('attention.menuGoTo')).setIcon('arrow-right')
       .onClick(() => { void this.jumpTo(annotation, targetPath); }));
-    menu.addItem(i => i.setTitle('Mark again').setIcon('plus')
+    menu.addItem(i => i.setTitle(t('attention.menuMarkAgain')).setIcon('plus')
       .onClick(() => { void this.markAgain(targetPath, annotation); }));
-    menu.addItem(i => i.setTitle(isComment(annotation) ? 'Edit comment…' : 'Add a comment…')
+    menu.addItem(i => i.setTitle(isComment(annotation) ? t('attention.menuEditComment') : t('attention.menuAddComment'))
       .setIcon('message-square').onClick(() => this.editComment(targetPath, annotation)));
-    menu.addItem(i => i.setTitle('Copy details').setIcon('copy')
+    menu.addItem(i => i.setTitle(t('attention.menuCopyDetails')).setIcon('copy')
       .onClick(() => { void this.copyDetails(annotation, targetPath); }));
-    menu.addItem(i => i.setTitle('Re-attach to selection').setIcon('link')
+    menu.addItem(i => i.setTitle(t('attention.menuReattach')).setIcon('link')
       .onClick(() => { void this.reattach(targetPath, annotation); }));
-    menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
+    menu.addItem(i => i.setTitle(t('attention.menuCopyText')).setIcon('copy')
       .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.kind === 'pdf' ? readablePdf(annotation.anchor.quote) : readable(annotation.anchor.quote)); }));
-    menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
+    menu.addItem(i => i.setTitle(t('attention.menuRemoveMark')).setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
     menu.showAtPosition(at);
   }
@@ -406,32 +409,32 @@ export class ReviewView extends ItemView {
       clock: fmtTime,
     });
     await navigator.clipboard.writeText(text);
-    new Notice('Attention: mark copied.');
+    new Notice(t('attention.noticeCopied'));
   }
 
   private async reattach(targetPath: string, annotation: Annotation): Promise<void> {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || view.file?.path !== targetPath || view.getMode() !== 'source') {
-      new Notice('Open the note in editing mode and select the text this should mark.');
+      new Notice(t('attention.noticeReattachOpenEditor'));
       return;
     }
     const editor = view.editor;
     const from = editor.posToOffset(editor.getCursor('from'));
     const to = editor.posToOffset(editor.getCursor('to'));
     if (from === to) {
-      new Notice('Select the text this mark should attach to, then try again.');
+      new Notice(t('attention.noticeReattachSelect'));
       return;
     }
 
     await this.plugin.store.update(targetPath, annotation.id, {
       anchor: { kind: 'markdown', ...describeAnchor(editor.getValue(), from, to) },
     });
-    new Notice(`Re-attached to “${editor.getValue().slice(from, to).slice(0, 20)}”.`);
+    new Notice(t('attention.noticeReattached', { text: editor.getValue().slice(from, to).slice(0, 20) }));
   }
 
   private async markAgain(targetPath: string, annotation: Annotation): Promise<void> {
     const updated = await this.plugin.store.markAgain(targetPath, annotation.id);
-    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
+    if (updated) new Notice(t('attention.noticeMarkedTimes', { count: updated.hits.length }));
   }
 
   private editComment(targetPath: string, annotation: Annotation): void {

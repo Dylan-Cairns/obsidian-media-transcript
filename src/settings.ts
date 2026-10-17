@@ -2,6 +2,7 @@ import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import { MODULES } from './modules';
 import type MediaTranscriptPlugin from './main';
 import { parseFolderList } from './utils/mediaMatch';
+import { t } from './i18n';
 import {
   MediaTranscriptView,
   VIEW_TYPE_MEDIA_TRANSCRIPT,
@@ -86,13 +87,13 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
     this.displayServer(containerEl);
     this.displayModuleSwitches(containerEl);
 
-    new Setting(containerEl).setName('Subtitles').setHeading();
+    new Setting(containerEl).setName(t('core.headingSubtitles')).setHeading();
 
     new Setting(containerEl)
-      .setName('Subtitle folder')
-      .setDesc("Leave empty to use each media file's own folder (reads a same-named .json / .srt / .vtt).")
-      .addText(t =>
-        t.setPlaceholder("Empty = media file's folder")
+      .setName(t('core.settingSubtitleFolder'))
+      .setDesc(t('core.settingSubtitleFolderDesc'))
+      .addText(text =>
+        text.setPlaceholder(t('core.settingSubtitleFolderPlaceholder'))
           .setValue(this.plugin.settings.subtitleDirectory)
           .onChange(async v => {
             this.plugin.settings.subtitleDirectory = v.trim();
@@ -101,10 +102,10 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Subtitle priority')
-      .setDesc('Order of filename [marker] tags, comma-separated (empty = no marker, e.g. video.srt).')
-      .addText(t =>
-        t.setPlaceholder('vibevoice-4bit, whisper,')
+      .setName(t('core.settingSubtitlePriority'))
+      .setDesc(t('core.settingSubtitlePriorityDesc'))
+      .addText(text =>
+        text.setPlaceholder('vibevoice-4bit, whisper,')
           .setValue(this.plugin.settings.priorities.map(p => p.marker).join(', '))
           .onChange(async v => {
             const markers = v.split(',').map(s => s.trim()).filter((m, i, a) => a.indexOf(m) === i);
@@ -114,70 +115,52 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       );
 
     // ── Media ───────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Media').setHeading();
+    new Setting(containerEl).setName(t('core.headingMedia')).setHeading();
 
     new Setting(containerEl)
-      .setName('Media folders')
-      .setDesc(
-        "Where to find a transcript's audio/video when it isn't in the transcript's own folder. " +
-          'One folder per line, searched in order, subfolders included; matched by filename. ' +
-          'A vault folder (附件/media) or, on desktop, an absolute folder outside the vault ' +
-          '(/Volumes/2T/Media, ~/Recordings). With no media found, the transcript opens for reading only.',
-      )
-      .addTextArea(t => {
-        t.setPlaceholder('附件/media\n/Volumes/2T/Media')
+      .setName(t('core.settingMediaFolders'))
+      .setDesc(t('core.settingMediaFoldersDesc'))
+      .addTextArea(text => {
+        text.setPlaceholder('附件/media\n/Volumes/2T/Media')
           .setValue(this.plugin.settings.mediaFolders.join('\n'))
           .onChange(async v => {
             this.plugin.settings.mediaFolders = parseFolderList(v);
             await this.plugin.saveSettings();
             this.plugin.mediaLocator.invalidate();
           });
-        t.inputEl.rows = 4;
+        text.inputEl.rows = 4;
       });
 
     new Setting(containerEl)
-      .setName('Remote media URLs')
-      .setDesc(
-        'Searched after the folders above: a server holding the media, streamed with seeking — ' +
-          'e.g. a home computer over Tailscale (https://old-mac.example.ts.net/recordings). ' +
-          'One URL per line. A server with an index.json (written by the offload script) can keep files ' +
-          'in any folders; otherwise files are expected directly under the URL, by name. ' +
-          "If a server doesn't answer within 5 seconds, the transcript opens for reading only.",
-      )
-      .addTextArea(t => {
-        t.setPlaceholder('https://old-mac.example.ts.net/recordings')
+      .setName(t('core.settingRemoteUrls'))
+      .setDesc(t('core.settingRemoteUrlsDesc'))
+      .addTextArea(text => {
+        text.setPlaceholder('https://old-mac.example.ts.net/recordings')
           .setValue(this.plugin.settings.mediaUrls.join('\n'))
           .onChange(async v => {
             this.plugin.settings.mediaUrls = parseFolderList(v);
             await this.plugin.saveSettings();
             this.plugin.mediaLocator.invalidate();
           });
-        t.inputEl.rows = 3;
+        text.inputEl.rows = 3;
       });
 
     new Setting(containerEl)
-      .setName('Play from a server first')
-      .setDesc(
-        'Look for media on the servers above before the vault and media folders, and use the vault copy ' +
-          "only when no server has it or none answers. Useful when local copies live in iCloud and " +
-          'would have to download before playing.',
-      )
-      .addToggle(t =>
-        t.setValue(this.plugin.settings.preferRemote).onChange(async v => {
+      .setName(t('core.settingPreferRemote'))
+      .setDesc(t('core.settingPreferRemoteDesc'))
+      .addToggle(toggle =>
+        toggle.setValue(this.plugin.settings.preferRemote).onChange(async v => {
           this.plugin.settings.preferRemote = v;
           await this.plugin.saveSettings();
         }),
       );
 
     // ── Layout ──────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Layout').setHeading();
+    new Setting(containerEl).setName(t('core.headingLayout')).setHeading();
 
     new Setting(containerEl)
-      .setName('Video pane width')
-      .setDesc(
-        'How much horizontal space the video takes in video mode (the rest goes to the transcript). ' +
-          '75% ≈ 3:1, 67% ≈ 2:1, 50% = 1:1. Dragging the divider updates this too. Audio mode is always full-width.',
-      )
+      .setName(t('core.settingVideoWidth'))
+      .setDesc(t('core.settingVideoWidthDesc'))
       .addSlider(s =>
         s
           .setLimits(20, 75, 1)
@@ -193,11 +176,8 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Transcript font size')
-      .setDesc(
-        `Text size of the transcript, in pixels (${MIN_FONT_SIZE}–${MAX_FONT_SIZE}). ` +
-          'The A− / A+ buttons in the transcript toolbar change this too.',
-      )
+      .setName(t('core.settingFontSize'))
+      .setDesc(t('core.settingFontSizeDesc', { min: MIN_FONT_SIZE, max: MAX_FONT_SIZE }))
       .addSlider(s =>
         s
           .setLimits(MIN_FONT_SIZE, MAX_FONT_SIZE, 1)
@@ -210,29 +190,23 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       );
 
     // ── Playback ────────────────────────────────────────────────────────────
-    new Setting(containerEl).setName('Playback').setHeading();
+    new Setting(containerEl).setName(t('core.headingPlayback')).setHeading();
 
     new Setting(containerEl)
-      .setName('Auto-scroll transcript')
-      .setDesc(
-        'While playing, keep the current line vertically centered. ' +
-          'Scrolling by hand pauses this for a few seconds so you can read ahead.',
-      )
-      .addToggle(t =>
-        t.setValue(this.plugin.settings.autoScroll).onChange(async v => {
+      .setName(t('core.settingAutoScroll'))
+      .setDesc(t('core.settingAutoScrollDesc'))
+      .addToggle(toggle =>
+        toggle.setValue(this.plugin.settings.autoScroll).onChange(async v => {
           this.plugin.settings.autoScroll = v;
           await this.plugin.saveSettings();
         }),
       );
 
     new Setting(containerEl)
-      .setName('Play videos as audio only')
-      .setDesc(
-        "Don't show the picture for video files — a slim control bar and a full-width " +
-          'transcript instead. The 🎧 / 🎬 button in the transcript toolbar toggles this per view.',
-      )
-      .addToggle(t =>
-        t.setValue(this.plugin.settings.videoAudioOnly).onChange(async v => {
+      .setName(t('core.settingAudioOnly'))
+      .setDesc(t('core.settingAudioOnlyDesc'))
+      .addToggle(toggle =>
+        toggle.setValue(this.plugin.settings.videoAudioOnly).onChange(async v => {
           this.plugin.settings.videoAudioOnly = v;
           await this.plugin.saveSettings();
           for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_MEDIA_TRANSCRIPT)) {
@@ -255,34 +229,31 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
   private displayServer(containerEl: HTMLElement): void {
     let value = this.plugin.settings.serverUrl;
     new Setting(containerEl)
-      .setName('Media One server')
-      .setDesc(
-        'Where your media lives, reached over Tailscale or your network. Recordings are read from ' +
-          '<server>/library and the web image archive is shared through <server>/archive; ' +
-          'both are added to the lists below, first. Leave empty to use only those lists.',
-      )
-      .addText(t =>
-        t.setPlaceholder('https://media.example.ts.net')
+      .setName(t('core.settingServer'))
+      .setDesc(t('core.settingServerDesc'))
+      .addText(text =>
+        text.setPlaceholder('https://media.example.ts.net')
           .setValue(value)
           .onChange(v => { value = v; }),
       )
       .addButton(b =>
-        b.setButtonText('Save').onClick(async () => {
+        b.setButtonText(t('core.save')).onClick(async () => {
           await this.plugin.setServer(value);
-          new Notice(this.plugin.settings.serverUrl ? `Media One server: ${this.plugin.settings.serverUrl}` : 'Media One server removed.');
+          new Notice(this.plugin.settings.serverUrl
+            ? t('core.serverSet', { url: this.plugin.settings.serverUrl })
+            : t('core.serverRemoved'));
           this.display();
         }),
       );
     new Setting(containerEl)
-      .setName('Upload new media to the server')
+      .setName(t('core.settingUploadNew'))
       .setDesc(
-        'Recordings and videos added to the vault are uploaded to the server right away (checked by sha256), ' +
-          'so every device can play them. The file stays in the vault. Without a connection it waits and is ' +
-          'retried every 10 minutes.' +
-          (this.plugin.uploader.pending.length ? ` Waiting on this device: ${this.plugin.uploader.pending.length}.` : ''),
+        this.plugin.uploader.pending.length
+          ? t('core.settingUploadNewDescWaiting', { n: this.plugin.uploader.pending.length })
+          : t('core.settingUploadNewDesc'),
       )
-      .addToggle(t =>
-        t.setValue(this.plugin.settings.uploadNewMedia).onChange(async v => {
+      .addToggle(toggle =>
+        toggle.setValue(this.plugin.settings.uploadNewMedia).onChange(async v => {
           this.plugin.settings.uploadNewMedia = v;
           await this.plugin.saveSettings();
           if (v) void this.plugin.uploader.flush();
@@ -294,20 +265,20 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
   private displayModuleSwitches(containerEl: HTMLElement): void {
     const modules = this.plugin.modules;
     if (!modules) return;
-    new Setting(containerEl).setName('Modules').setHeading();
+    new Setting(containerEl).setName(t('core.headingModules')).setHeading();
     let changed = false;
     const reload = new Setting(containerEl)
-      .setName('Reload to apply')
-      .setDesc('Modules switched on or off start or stop when Media One reloads.')
-      .addButton(b => b.setButtonText('Reload Media One').setCta().onClick(() => { void this.reloadPlugin(); }));
+      .setName(t('core.settingReload'))
+      .setDesc(t('core.settingReloadDesc'))
+      .addButton(b => b.setButtonText(t('core.reloadButton')).setCta().onClick(() => { void this.reloadPlugin(); }));
     reload.settingEl.hide();
     for (const info of MODULES) {
       const setting = new Setting(containerEl).setName(info.name).setDesc(info.desc);
       const why = modules.skipped.get(info.key);
       if (why) setting.descEl.createDiv({ cls: 'mod-warning', text: why });
-      setting.addToggle(t => {
-        t.setValue(modules.chosen(info.key));
-        t.onChange(async on => {
+      setting.addToggle(toggle => {
+        toggle.setValue(modules.chosen(info.key));
+        toggle.onChange(async on => {
           await modules.setEnabled(info.key, on);
           if (!changed) {
             changed = true;
@@ -324,7 +295,7 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
     const plugins = (this.app as unknown as { plugins?: { disablePlugin(id: string): Promise<void>; enablePlugin(id: string): Promise<boolean> } }).plugins;
     const id = this.plugin.manifest.id;
     if (!plugins) {
-      new Notice('Reload Obsidian to apply the change.');
+      new Notice(t('core.reloadObsidian'));
       return;
     }
     await plugins.disablePlugin(id);

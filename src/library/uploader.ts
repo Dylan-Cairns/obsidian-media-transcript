@@ -2,6 +2,7 @@ import { Notice, TAbstractFile, TFile } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import { sha256Hex } from './client';
 import { DeviceState } from './deviceState';
+import { t } from '../i18n';
 
 // A recording still being written grows; wait until it stops.
 const SETTLE_MS = 3000;
@@ -105,19 +106,19 @@ export class Uploader {
     if (!(file instanceof TFile)) return 'done';
     if (!(await this.settled(file))) return 'retry';
     if (file.stat.size > MAX_BYTES) {
-      new Notice(`Media One: ${file.name} is over 1 GB; upload it to the server another way.`);
+      new Notice(t('library.uploadTooBig', { name: file.name }));
       return 'done';
     }
     try {
       const data = await vault.readBinary(file);
       const stored = await this.plugin.library.upload(file.path, data, await sha256Hex(data));
-      if (stored) new Notice(`Uploaded ${file.name} to the Media One server`);
+      if (stored) new Notice(t('library.uploaded', { name: file.name }));
       this.plugin.mediaLocator.invalidate();
       return 'done';
     } catch (e) {
       const status = (e as { status?: number }).status ?? 0;
       if (status === 409) {
-        new Notice(`Media One: the server already has a different ${file.name} at ${file.path}; not uploaded.`, 10000);
+        new Notice(t('library.uploadConflict', { name: file.name, path: file.path }), 10000);
         return 'done';
       }
       if (status === 400) {

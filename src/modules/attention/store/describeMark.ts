@@ -9,6 +9,7 @@
 
 import { Annotation, isComment } from '../model';
 import { readable, readablePdf } from '../anchor/cjk';
+import { t } from '../../../i18n';
 
 export interface Described {
   /** What to put on the clipboard. */
@@ -32,7 +33,7 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
   // the passage it is, not as a field in a record.
   // A region of a PDF may have no words in it; say what it is instead.
   const quote = (anchor.kind === 'pdf' ? readablePdf(anchor.quote) : readable(anchor.quote)) ||
-    (anchor.kind === 'pdf' && anchor.region ? `(a region of page ${anchor.region.page})` : '');
+    (anchor.kind === 'pdf' && anchor.region ? t('attention.copyRegion', { page: anchor.region.page }) : '');
   for (const line of quote.split('\n')) lines.push(`> ${line}`);
 
   if (isComment(annotation)) {
@@ -41,21 +42,23 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
   }
 
   lines.push('');
-  lines.push(`Source: ${options.targetPath}`);
+  lines.push(t('attention.copySource', { path: options.targetPath }));
 
   if (anchor.kind === 'transcript' && options.clock) {
-    lines.push(`At: ${options.clock(anchor.start)}`);
+    lines.push(t('attention.copyAt', { time: options.clock(anchor.start) }));
   }
   if (anchor.kind === 'pdf') {
     const pages = anchor.region ? [anchor.region.page] : [...new Set(anchor.spans.map(s => s.page))];
-    lines.push(pages.length === 1 ? `Page: ${pages[0]}` : `Pages: ${pages[0]}–${pages[pages.length - 1]}`);
+    lines.push(pages.length === 1
+      ? t('attention.copyPage', { page: pages[0] })
+      : t('attention.copyPages', { from: pages[0], to: pages[pages.length - 1] }));
   }
 
   const times = annotation.hits.map(options.when);
   lines.push(
     annotation.hits.length === 1
-      ? `Marked: ${times[0]}`
-      : `Marked ${annotation.hits.length}×: ${times.join(', ')}`,
+      ? t('attention.copyMarkedOnce', { time: times[0] })
+      : t('attention.copyMarkedTimes', { count: annotation.hits.length, times: times.join(', ') }),
   );
 
   return { text: lines.join('\n') };

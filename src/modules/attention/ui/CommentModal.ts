@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from 'obsidian';
+import { t } from '../../../i18n';
 
 /** Prompt for an annotation's comment. Pre-filled when editing an existing one. */
 export class CommentModal extends Modal {
@@ -21,7 +22,7 @@ export class CommentModal extends Modal {
 
     const input = contentEl.createEl('textarea', { cls: 'at-comment-input' });
     input.value = this.value;
-    input.placeholder = 'What caught your attention?';
+    input.placeholder = t('attention.placeholderComment');
     input.addEventListener('input', () => { this.value = input.value; });
     input.addEventListener('keydown', e => {
       // Cmd/Ctrl+Enter submits; plain Enter stays a newline.
@@ -32,7 +33,7 @@ export class CommentModal extends Modal {
     });
 
     new Setting(contentEl).addButton(b =>
-      b.setButtonText('Save').setCta().onClick(() => this.submit()),
+      b.setButtonText(t('attention.buttonSave')).setCta().onClick(() => this.submit()),
     );
 
     window.setTimeout(() => input.focus(), 0);

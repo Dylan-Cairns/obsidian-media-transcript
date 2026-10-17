@@ -1,6 +1,7 @@
 import { Notice, TFile, normalizePath } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import { rewriteNote, type LinkAt, type Target } from './links';
+import { t } from '../i18n';
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
@@ -28,7 +29,7 @@ export async function renameMedia(plugin: MediaTranscriptPlugin, from: string, t
     await plugin.renameTranscripts(nameOf(from), nameOf(to), dirOf(from));
   }
   await moveAnnotations(plugin, from, to);
-  if (changed > 0) new Notice(`Updated ${changed} link${changed > 1 ? 's' : ''} to ${nameOf(to)}`);
+  if (changed > 0) new Notice(t(changed > 1 ? 'library.linksUpdatedMany' : 'library.linksUpdatedOne', { count: changed, name: nameOf(to) }));
   plugin.mediaLocator.invalidate();
 }
 
@@ -83,7 +84,7 @@ async function moveAnnotations(plugin: MediaTranscriptPlugin, from: string, to: 
     if (file.name !== oldName) continue;
     const target = normalizePath(`${file.parent?.path ?? ''}/${nameOf(to)}.anno.json`);
     if (vault.getAbstractFileByPath(target)) {
-      new Notice(`Kept ${file.path}: ${target} already exists.`);
+      new Notice(t('library.annotationsKept', { path: file.path, target }));
       continue;
     }
     await vault.process(file, text => {

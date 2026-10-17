@@ -27,6 +27,7 @@ import { PdfHost } from './hosts/pdf/PdfHost';
 import { planMove } from './store/migrateToTrack';
 import { ViewModeHost } from './hosts/markdown/viewModeHost';
 import type { ViewModeTarget } from './viewMode';
+import { t } from '../../i18n';
 
 export default class AttentionPlugin extends ModulePlugin {
   settings!: AttentionSettings;
@@ -87,11 +88,11 @@ export default class AttentionPlugin extends ModulePlugin {
     // vault has finished indexing rather than fighting it during startup.
     this.app.workspace.onLayoutReady(() => { void this.onLayoutReady(); });
 
-    this.addRibbonIcon('highlighter', 'Attention', () => { void this.openReview(); });
+    this.addRibbonIcon('highlighter', t('attention.ribbon'), () => { void this.openReview(); });
 
     this.addCommand({
       id: 'open-review',
-      name: 'Open review',
+      name: t('attention.commandOpenReview'),
       callback: () => { void this.openReview(); },
     });
 
@@ -136,10 +137,7 @@ export default class AttentionPlugin extends ModulePlugin {
 
     if (!(target instanceof TFile)) {
       // The annotated file is gone; the sidecar is all that's left of it.
-      new Notice(
-        `Attention: “${targetPath ?? file.name}” no longer exists. ` +
-          'Its marks are still here — delete this file to discard them.',
-      );
+      new Notice(t('attention.noticeSidecarOrphan', { name: targetPath ?? file.name }));
       return false;
     }
 
@@ -306,7 +304,7 @@ export default class AttentionPlugin extends ModulePlugin {
     this.settings.transcriptMarksOnTrack = true;
     await this.saveSettings();
     if (moved > 0) {
-      new Notice(`Attention: ${moved} transcript mark${moved === 1 ? '' : 's'} now filed under their subtitle track.`);
+      new Notice(t(moved === 1 ? 'attention.noticeTranscriptMovedOne' : 'attention.noticeTranscriptMovedMany', { count: moved }));
     }
   }
 
@@ -395,7 +393,7 @@ export default class AttentionPlugin extends ModulePlugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new Notice(`Attention: could not move annotations for ${file.name}`);
+      new Notice(t('attention.noticeMoveFailed', { name: file.name }));
       console.error(e);
     }
   }

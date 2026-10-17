@@ -23,7 +23,22 @@ export interface MediaDeps {
 	/** 笔记 frontmatter 里的 source（原文地址）。 */
 	pageUrlOf: (sourcePath: string) => string | undefined;
 	warn?: (...args: unknown[]) => void;
+	/** 失败说明的文字，默认是中文。 */
+	text?: FailureText;
 }
+
+export interface FailureText {
+	failed: (message: string) => string;
+	/** 失败说明和「到原文观看」之间的分隔。 */
+	join: string;
+	watchOriginal: string;
+}
+
+const DEFAULT_TEXT: FailureText = {
+	failed: (message) => `加载失败（${message}）`,
+	join: "，",
+	watchOriginal: "到原文观看",
+};
 
 export class MediaController {
 	/** 原地址 → blob 地址。同一个视频在阅读视图和实时预览里只要一次。 */
@@ -92,10 +107,11 @@ export class MediaController {
 	private showFailure(el: HTMLElement, message: string, pageUrl?: string) {
 		const media = el.tagName === "SOURCE" && el.parentElement ? el.parentElement : el;
 		if (media.nextElementSibling?.classList.contains(FAILED_CLASS)) return;
-		const note = createDiv({ cls: FAILED_CLASS, text: `加载失败（${message}）` });
+		const text = this.deps.text ?? DEFAULT_TEXT;
+		const note = createDiv({ cls: FAILED_CLASS, text: text.failed(message) });
 		if (pageUrl) {
-			note.append("，");
-			note.createEl("a", { text: "到原文观看", href: pageUrl });
+			note.append(text.join);
+			note.createEl("a", { text: text.watchOriginal, href: pageUrl });
 		}
 		media.insertAdjacentElement("afterend", note);
 		this.deps.warn?.("[hotlink-media]", message, el.getAttribute(ORIGINAL));

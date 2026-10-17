@@ -15,6 +15,9 @@ Media. They are now modules of this one, and each can be switched off in
 | [Web image archive](#web-image-archive) | Saves remote images a note embeds and shows the saved copy, from your servers or a local folder | Archive Redirect | Off (on if you used Archive Redirect) |
 | [Hotlink-protected media](#hotlink-protected-media) | Plays media from sites that only serve their own pages, by sending the headers they expect (desktop only) | Hotlink Media | On |
 
+Media One speaks the language Obsidian is set to (English and Simplified Chinese so far; other
+languages show English).
+
 Switching a module on or off takes effect when Media One reloads; the settings tab offers a
 button for it.
 

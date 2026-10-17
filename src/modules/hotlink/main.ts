@@ -3,11 +3,16 @@ import { ModulePlugin } from "../module";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { fetchMedia } from "./fetch";
 import { MediaController } from "./media";
-import type { RequestOptions } from "./rules";
+import type { RequestOptions, Rule } from "./rules";
+import { t } from "../../i18n";
 
 // Loaded on first use: it needs Node's http/https, which only the desktop app
 // has, and the bundle loads on phones too (this module is off there).
 const nodeRequest = (options: RequestOptions) => import("./request").then(m => m.nodeRequest(options));
+
+const ruleName = (rule: Rule) => (rule.id === "wechat-video" ? t("hotlink.ruleWechatVideo") : rule.name);
+const refusedMessage = (rule: Rule, attempts: number, status: number) =>
+	t("hotlink.fetchRefused", { rule: ruleName(rule), attempts, status });
 
 export default class HotlinkMediaPlugin extends ModulePlugin {
 	media!: MediaController;
@@ -27,7 +32,7 @@ export default class HotlinkMediaPlugin extends ModulePlugin {
 		);
 
 		this.media = new MediaController({
-			fetch: (url, rule, pageUrl) => fetchMedia(url, rule, { pageUrl, request: nodeRequest }),
+			fetch: (url, rule, pageUrl) => fetchMedia(url, rule, { pageUrl, request: nodeRequest }, { refusedMessage }),
 			toObjectUrl: (body, type) => URL.createObjectURL(new Blob([body as BlobPart], { type: type || undefined })),
 			revokeObjectUrl: (u) => URL.revokeObjectURL(u),
 			observe: (el) => this.observer.observe(el),
@@ -36,6 +41,11 @@ export default class HotlinkMediaPlugin extends ModulePlugin {
 				return typeof source === "string" ? source : undefined;
 			},
 			warn: (...a) => console.warn(...a),
+			text: {
+				failed: (message) => t("hotlink.failedNote", { message }),
+				join: t("hotlink.failedNoteJoin"),
+				watchOriginal: t("hotlink.watchOriginal"),
+			},
 		});
 
 		// 阅读视图

@@ -2,6 +2,7 @@ import { App, ItemView, Menu, Modal, Notice, Setting, TFile, WorkspaceLeaf, setI
 import type MediaTranscriptPlugin from '../main';
 import type { Job, LibraryFile, TrashItem } from './client';
 import { deleteMedia, renameMedia, restoreMedia } from './actions';
+import { t } from '../i18n';
 
 export const VIEW_TYPE_LIBRARY = 'media-one-library';
 
@@ -29,7 +30,7 @@ export class LibraryView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Media library';
+    return t('library.viewTitle');
   }
 
   getIcon(): string {
@@ -41,12 +42,12 @@ export class LibraryView extends ItemView {
     root.empty();
     root.addClass('mo-lib');
     const bar = root.createDiv('mo-lib-bar');
-    const search = bar.createEl('input', { type: 'search', placeholder: 'Filter by name or folder', cls: 'mo-lib-search' });
+    const search = bar.createEl('input', { type: 'search', placeholder: t('library.filterPlaceholder'), cls: 'mo-lib-search' });
     search.addEventListener('input', () => {
       this.filter = search.value.trim().toLowerCase();
       this.renderList();
     });
-    const refresh = bar.createEl('button', { cls: 'clickable-icon mo-lib-refresh', attr: { 'aria-label': 'Refresh' } });
+    const refresh = bar.createEl('button', { cls: 'clickable-icon mo-lib-refresh', attr: { 'aria-label': t('library.refresh') } });
     setIcon(refresh, 'refresh-cw');
     refresh.addEventListener('click', () => { void this.refresh(); });
     this.statusEl = root.createDiv('mo-lib-status');
@@ -61,7 +62,7 @@ export class LibraryView extends ItemView {
   async refresh(): Promise<void> {
     const { library } = this.plugin;
     if (!library.configured) {
-      this.error = 'Set your Media One server in the settings to see its library.';
+      this.error = t('library.notConfigured');
       this.files = [];
       this.trashItems = [];
     } else {
@@ -91,8 +92,8 @@ export class LibraryView extends ItemView {
       statusEl.createSpan({ cls: 'mo-lib-error', text: this.error });
     } else {
       const size = this.files.reduce((n, f) => n + f.size, 0);
-      statusEl.setText(`${this.files.length} files on the server, ${formatSize(size)}` +
-        (waiting ? ` · ${waiting} waiting to upload` : ''));
+      const vars = { count: this.files.length, size: formatSize(size), waiting };
+      statusEl.setText(waiting ? t('library.statusWaiting', vars) : t('library.status', vars));
     }
 
     const shown = this.files
@@ -108,19 +109,19 @@ export class LibraryView extends ItemView {
       this.renderRow(listEl, f);
     }
     if (!this.error && shown.length === 0) {
-      listEl.createDiv({ cls: 'mo-lib-empty', text: this.filter ? 'Nothing matches.' : 'No media on the server yet.' });
+      listEl.createDiv({ cls: 'mo-lib-empty', text: this.filter ? t('library.nothingMatches') : t('library.empty') });
     }
 
     if (this.trashItems.length > 0) {
       const details = listEl.createEl('details', { cls: 'mo-lib-trash' });
-      details.createEl('summary', { text: `Trash (${this.trashItems.length}) — kept 30 days` });
-      for (const t of [...this.trashItems].sort((a, b) => b.trashed.localeCompare(a.trashed))) {
+      details.createEl('summary', { text: t('library.trashSummary', { count: this.trashItems.length }) });
+      for (const item of [...this.trashItems].sort((a, b) => b.trashed.localeCompare(a.trashed))) {
         const row = details.createDiv('mo-lib-row');
         const main = row.createDiv('mo-lib-main');
-        main.createDiv({ cls: 'mo-lib-name', text: t.path.slice(t.path.indexOf('/') + 1) });
-        main.createDiv({ cls: 'mo-lib-meta', text: `deleted ${t.trashed.replace('T', ' ')}` });
-        const restore = row.createEl('button', { text: 'Restore', cls: 'mo-lib-restore' });
-        restore.addEventListener('click', () => { void this.restore(t); });
+        main.createDiv({ cls: 'mo-lib-name', text: item.path.slice(item.path.indexOf('/') + 1) });
+        main.createDiv({ cls: 'mo-lib-meta', text: t('library.deletedAt', { date: item.trashed.replace('T', ' ') }) });
+        const restore = row.createEl('button', { text: t('library.restore'), cls: 'mo-lib-restore' });
+        restore.addEventListener('click', () => { void this.restore(item); });
       }
     }
   }
@@ -133,40 +134,40 @@ export class LibraryView extends ItemView {
     const meta = main.createDiv('mo-lib-meta');
     meta.appendText(`${formatSize(f.size)}${f.added ? ' · ' + f.added.slice(0, 10) : ''}`);
     if (this.plugin.transcripts.transcriptsFor(nameOf(f.vaultPath)).length > 0) {
-      meta.createSpan({ cls: 'mo-lib-badge', text: 'transcript' });
+      meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeTranscript') });
     }
     if (this.plugin.app.vault.getAbstractFileByPath(f.vaultPath) instanceof TFile) {
-      meta.createSpan({ cls: 'mo-lib-badge', text: 'on this device' });
+      meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeOnDevice') });
     }
     if (!f.backup || Object.keys(f.backup).length === 0) {
-      meta.createSpan({ cls: 'mo-lib-badge mo-lib-nobackup', text: 'no backup yet', attr: { title: 'Only on the server so far; the nightly backup copies it.' } });
+      meta.createSpan({ cls: 'mo-lib-badge mo-lib-nobackup', text: t('library.badgeNoBackup'), attr: { title: t('library.badgeNoBackupTip') } });
     }
     const job = this.jobsByPath.get(f.vaultPath);
     if (job && job.state !== 'done' && job.state !== 'canceled') {
-      const label = job.state === 'queued' ? 'waiting to transcribe' : job.state === 'claimed' ? 'transcribing' : 'transcription failed';
+      const label = job.state === 'queued' ? t('library.jobQueued') : job.state === 'claimed' ? t('library.jobClaimed') : t('library.jobFailed');
       const badge = meta.createSpan({ cls: `mo-lib-badge mo-lib-job-${job.state}`, text: label });
       if (job.error) badge.setAttr('title', job.error);
     }
     main.addEventListener('click', () => { void this.play(f, row); });
 
     const actions = row.createDiv('mo-lib-actions');
-    const rename = actions.createEl('button', { cls: 'clickable-icon mo-lib-rename', attr: { 'aria-label': 'Rename or move' } });
+    const rename = actions.createEl('button', { cls: 'clickable-icon mo-lib-rename', attr: { 'aria-label': t('library.renameOrMove') } });
     setIcon(rename, 'pencil');
     rename.addEventListener('click', () => this.askRename(f));
-    const del = actions.createEl('button', { cls: 'clickable-icon mo-lib-delete', attr: { 'aria-label': 'Delete' } });
+    const del = actions.createEl('button', { cls: 'clickable-icon mo-lib-delete', attr: { 'aria-label': t('library.delete') } });
     setIcon(del, 'trash-2');
     del.addEventListener('click', () => this.askDelete(f));
 
     row.addEventListener('contextmenu', evt => {
       const menu = new Menu();
-      menu.addItem(i => i.setTitle('Play').setIcon('play').onClick(() => { void this.play(f, row); }));
-      menu.addItem(i => i.setTitle('Rename or move…').setIcon('pencil').onClick(() => this.askRename(f)));
-      menu.addItem(i => i.setTitle('Transcribe again').setIcon('file-audio').onClick(() => { void this.transcribe(f); }));
-      menu.addItem(i => i.setTitle('Copy embed').setIcon('copy').onClick(() => {
+      menu.addItem(i => i.setTitle(t('library.menuPlay')).setIcon('play').onClick(() => { void this.play(f, row); }));
+      menu.addItem(i => i.setTitle(t('library.menuRename')).setIcon('pencil').onClick(() => this.askRename(f)));
+      menu.addItem(i => i.setTitle(t('library.menuTranscribe')).setIcon('file-audio').onClick(() => { void this.transcribe(f); }));
+      menu.addItem(i => i.setTitle(t('library.menuCopyEmbed')).setIcon('copy').onClick(() => {
         void navigator.clipboard.writeText(`![[${nameOf(f.vaultPath)}]]`);
-        new Notice('Copied');
+        new Notice(t('library.copied'));
       }));
-      menu.addItem(i => i.setTitle('Delete').setIcon('trash-2').setWarning(true).onClick(() => this.askDelete(f)));
+      menu.addItem(i => i.setTitle(t('library.delete')).setIcon('trash-2').setWarning(true).onClick(() => this.askDelete(f)));
       menu.showAtMouseEvent(evt);
     });
   }
@@ -196,24 +197,23 @@ export class LibraryView extends ItemView {
     new RenameModal(this.app, f.vaultPath, async to => {
       try {
         await renameMedia(this.plugin, f.vaultPath, to);
-        new Notice(`Renamed to ${to}`);
+        new Notice(t('library.renamedTo', { path: to }));
       } catch (e) {
-        new Notice(`Could not rename: ${(e as Error).message}`);
+        new Notice(t('library.renameFailed', { error: (e as Error).message }));
       }
       await this.refresh();
     }).open();
   }
 
   askDelete(f: LibraryFile): void {
-    new ConfirmModal(this.app, `Delete ${nameOf(f.vaultPath)}?`,
-      'It moves to the server\'s trash, with its transcripts there, and can be restored for 30 days. ' +
-      'Notes that embed it keep their links.',
-      'Delete', async () => {
+    new ConfirmModal(this.app, t('library.deleteTitle', { name: nameOf(f.vaultPath) }),
+      t('library.deleteDesc'),
+      t('library.delete'), async () => {
         try {
           await deleteMedia(this.plugin, f.vaultPath);
-          new Notice(`Deleted ${nameOf(f.vaultPath)}`);
+          new Notice(t('library.deleted', { name: nameOf(f.vaultPath) }));
         } catch (e) {
-          new Notice(`Could not delete: ${(e as Error).message}`);
+          new Notice(t('library.deleteFailed', { error: (e as Error).message }));
         }
         await this.refresh();
       }).open();
@@ -222,19 +222,19 @@ export class LibraryView extends ItemView {
   private async transcribe(f: LibraryFile): Promise<void> {
     try {
       const job = await this.plugin.library.transcribe(f.vaultPath, true);
-      new Notice(job ? `${nameOf(f.vaultPath)} is waiting to be transcribed` : 'Nothing to transcribe');
+      new Notice(job ? t('library.transcribeQueued', { name: nameOf(f.vaultPath) }) : t('library.nothingToTranscribe'));
     } catch (e) {
-      new Notice(`Could not ask for a transcription: ${(e as Error).message}`);
+      new Notice(t('library.transcribeFailed', { error: (e as Error).message }));
     }
     await this.refresh();
   }
 
-  private async restore(t: TrashItem): Promise<void> {
+  private async restore(item: TrashItem): Promise<void> {
     try {
-      const path = await restoreMedia(this.plugin, t.id);
-      new Notice(`Restored ${path}`);
+      const path = await restoreMedia(this.plugin, item.id);
+      new Notice(t('library.restored', { path }));
     } catch (e) {
-      new Notice(`Could not restore: ${(e as Error).message}`);
+      new Notice(t('library.restoreFailed', { error: (e as Error).message }));
     }
     await this.refresh();
   }
@@ -246,7 +246,7 @@ export class RenameModal extends Modal {
   }
 
   onOpen(): void {
-    this.setTitle('Rename or move');
+    this.setTitle(t('library.renameOrMove'));
     let value = this.current;
     const submit = () => {
       const to = value.trim();
@@ -254,18 +254,18 @@ export class RenameModal extends Modal {
       if (to && to !== this.current) void this.onSubmit(to);
     };
     new Setting(this.contentEl)
-      .setName('New path')
-      .setDesc('A new name, or a folder and name, inside the vault. Keep the extension.')
-      .addText(t => {
-        t.setValue(value).onChange(v => { value = v; });
-        t.inputEl.addClass('mo-lib-rename-input');
-        t.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+      .setName(t('library.newPath'))
+      .setDesc(t('library.newPathDesc'))
+      .addText(text => {
+        text.setValue(value).onChange(v => { value = v; });
+        text.inputEl.addClass('mo-lib-rename-input');
+        text.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
         // Select the name without the extension, ready to type over.
         const start = value.lastIndexOf('/') + 1;
         const end = value.lastIndexOf('.') > start ? value.lastIndexOf('.') : value.length;
-        window.setTimeout(() => { t.inputEl.focus(); t.inputEl.setSelectionRange(start, end); }, 0);
+        window.setTimeout(() => { text.inputEl.focus(); text.inputEl.setSelectionRange(start, end); }, 0);
       });
-    new Setting(this.contentEl).addButton(b => b.setButtonText('Rename').setCta().onClick(submit));
+    new Setting(this.contentEl).addButton(b => b.setButtonText(t('library.rename')).setCta().onClick(submit));
   }
 }
 
@@ -279,7 +279,7 @@ export class ConfirmModal extends Modal {
     this.setTitle(this.heading);
     this.contentEl.createEl('p', { text: this.body });
     new Setting(this.contentEl)
-      .addButton(b => b.setButtonText('Cancel').onClick(() => this.close()))
+      .addButton(b => b.setButtonText(t('library.cancel')).onClick(() => this.close()))
       .addButton(b => b.setButtonText(this.confirm).setWarning().onClick(() => {
         this.close();
         void this.onConfirm();
@@ -294,5 +294,5 @@ function nameOf(path: string): string {
 function formatSize(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  return `${bytes === 0 ? 0 : Math.max(1, Math.round(bytes / 1e3))} KB`;
 }

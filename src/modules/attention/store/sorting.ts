@@ -6,15 +6,16 @@
 // something and it isn't where they expect.
 
 import { Annotation, firstMarked, lastMarked } from '../model';
+import { t } from '../../../i18n';
 
 export type Sort = 'recent' | 'marks' | 'oldest' | 'document';
 
-export const SORT_LABELS: Record<Sort, string> = {
-  recent: 'Recently marked',
-  marks: 'Times marked',
-  oldest: 'First marked',
-  document: 'Document order',
-};
+export const sortLabels = (): Record<Sort, string> => ({
+  recent: t('attention.sortRecent'),
+  marks: t('attention.sortMarks'),
+  oldest: t('attention.sortOldest'),
+  document: t('attention.sortDocument'),
+});
 
 /** Document order is only meaningful within one file. */
 export function sortsFor(lens: 'file' | 'all'): Sort[] {

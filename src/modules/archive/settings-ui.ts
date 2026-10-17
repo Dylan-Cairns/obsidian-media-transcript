@@ -3,6 +3,7 @@ import { ModuleSettingTab } from "../module";
 import type ArchiveRedirectPlugin from "./main";
 import { isExternalPath, normalizeServerUrl, type ArchiveMode, type ArchiveSource } from "./settings";
 import { findStaleCentralArchives, reconcile } from "./reconcile.ts";
+import { t } from "../../i18n";
 
 export class ArchiveSettingTab extends ModuleSettingTab {
 	constructor(app: App, private plugin: ArchiveRedirectPlugin) {
@@ -14,14 +15,11 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName("Archive mode")
-			.setDesc(
-				"Sibling: each Markdown file gets its own _archive subfolder next to it. " +
-					"Central: one shared folder at the vault root holds every cached file, deduped across notes.",
-			)
+			.setName(t("archive.settingMode"))
+			.setDesc(t("archive.settingModeDesc"))
 			.addDropdown((dd) => {
-				dd.addOption("sibling", "Sibling (per-note folder)");
-				dd.addOption("central", "Central (one shared folder)");
+				dd.addOption("sibling", t("archive.modeSibling"));
+				dd.addOption("central", t("archive.modeCentral"));
 				dd.setValue(this.plugin.settings.archiveMode).onChange(async (value) => {
 					this.plugin.settings.archiveMode = value as ArchiveMode;
 					await this.plugin.saveSettings();
@@ -31,8 +29,8 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 		if (this.plugin.settings.archiveMode === "sibling") {
 			new Setting(containerEl)
-				.setName("Archive directory name")
-				.setDesc("Subdirectory (sibling to each Markdown file) that holds cached resources.")
+				.setName(t("archive.settingDirName"))
+				.setDesc(t("archive.settingDirNameDesc"))
 				.addText((text) =>
 					text.setValue(this.plugin.settings.archiveDirName).onChange(async (value) => {
 						this.plugin.settings.archiveDirName = value || "_archive";
@@ -41,12 +39,8 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 				);
 		} else {
 			new Setting(containerEl)
-				.setName("Central archive path")
-				.setDesc(
-					"Folder that holds all cached files: vault-relative, or an absolute path " +
-						"(or ~/…) outside the vault. " +
-						"Files are bucketed by hash prefix (e.g. _archive/ab/abcd1234….jpg).",
-				)
+				.setName(t("archive.settingCentralPath"))
+				.setDesc(t("archive.settingCentralPathDesc"))
 				.addText((text) =>
 					text
 						.setPlaceholder("_archive")
@@ -67,14 +61,11 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 	private renderInVaultTools(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName("Migrate sibling archives")
-			.setDesc(
-				"Find every per-note sibling archive folder in this vault and move (or copy) " +
-					"its files into the central path above. Opens a preview before any file is touched.",
-			)
+			.setName(t("archive.settingMigrate"))
+			.setDesc(t("archive.settingMigrateDesc"))
 			.addButton((b) =>
 				b
-					.setButtonText("Migrate now…")
+					.setButtonText(t("archive.buttonMigrateNow"))
 					.setCta()
 					.onClick(() => this.plugin.openMigrateModal()),
 			);
@@ -84,14 +75,9 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 	private renderSources(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName("Sources")
+			.setName(t("archive.settingSources"))
 			.setHeading()
-			.setDesc(
-				"Where archived copies are shown from, first choice first. A copy that fails to load " +
-					"(server off, file not there yet) hands over to the next; the original URL comes last. " +
-					"New downloads are saved to the local archive and uploaded to every server; a server " +
-					"that can't be reached gets them once it's back.",
-			);
+			.setDesc(t("archive.settingSourcesDesc"));
 
 		const sources = this.plugin.settings.sources;
 		const save = async () => {
@@ -100,16 +86,16 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 		};
 		sources.forEach((source, i) => {
 			const row = new Setting(containerEl)
-				.setName(source.kind === "local" ? "Local archive" : source.url)
-				.setDesc(source.kind === "local" ? this.localLabel() : "Server (WebDAV)");
+				.setName(source.kind === "local" ? t("archive.sourceLocal") : source.url)
+				.setDesc(source.kind === "local" ? this.localLabel() : t("archive.sourceServer"));
 			row.addExtraButton((b) =>
-				b.setIcon("arrow-up").setTooltip("Move up").setDisabled(i === 0).onClick(async () => {
+				b.setIcon("arrow-up").setTooltip(t("archive.tooltipMoveUp")).setDisabled(i === 0).onClick(async () => {
 					[sources[i - 1], sources[i]] = [sources[i], sources[i - 1]];
 					await save();
 				}),
 			);
 			row.addExtraButton((b) =>
-				b.setIcon("arrow-down").setTooltip("Move down").setDisabled(i === sources.length - 1).onClick(async () => {
+				b.setIcon("arrow-down").setTooltip(t("archive.tooltipMoveDown")).setDisabled(i === sources.length - 1).onClick(async () => {
 					[sources[i + 1], sources[i]] = [sources[i], sources[i + 1]];
 					await save();
 				}),
@@ -117,7 +103,7 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 			// The local archive always stays: new downloads are kept there too.
 			if (source.kind === "server") {
 				row.addExtraButton((b) =>
-					b.setIcon("trash").setTooltip("Remove").onClick(async () => {
+					b.setIcon("trash").setTooltip(t("archive.tooltipRemove")).onClick(async () => {
 						sources.splice(i, 1);
 						delete this.plugin.settings.pendingUploads[source.url];
 						await save();
@@ -128,14 +114,14 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 		let draft = "";
 		new Setting(containerEl)
-			.setName("Add server")
-			.setDesc("WebDAV folder laid out like the central archive (<url>/ab/abcd1234….jpg), readable and writable.")
-			.addText((text) => text.setPlaceholder("WebDAV folder URL").onChange((v) => (draft = v)))
+			.setName(t("archive.settingAddServer"))
+			.setDesc(t("archive.settingAddServerDesc"))
+			.addText((text) => text.setPlaceholder(t("archive.placeholderServerUrl")).onChange((v) => (draft = v)))
 			.addButton((b) =>
-				b.setButtonText("Add").onClick(async () => {
+				b.setButtonText(t("archive.buttonAdd")).onClick(async () => {
 					const url = normalizeServerUrl(draft);
 					if (!/^https?:\/\//.test(url)) {
-						new Notice("Enter the server's http(s) address.");
+						new Notice(t("archive.noticeEnterServerUrl"));
 						return;
 					}
 					if (sources.some((s) => s.kind === "server" && s.url === url)) return;
@@ -148,13 +134,19 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 		const pending = this.plugin.servers.pendingCount();
 		if (pending > 0) {
 			new Setting(containerEl)
-				.setName("Waiting to upload")
-				.setDesc(`${pending} file(s) are saved locally but not on every server yet.`)
+				.setName(t("archive.settingWaitingUpload"))
+				.setDesc(
+					t(pending === 1 ? "archive.settingWaitingUploadDescOne" : "archive.settingWaitingUploadDescMany", { count: pending }),
+				)
 				.addButton((b) =>
-					b.setButtonText("Upload now").onClick(async () => {
+					b.setButtonText(t("archive.buttonUploadNow")).onClick(async () => {
 						await this.plugin.servers.flushAll();
 						const left = this.plugin.servers.pendingCount();
-						new Notice(left ? `${left} file(s) still waiting: server not reachable.` : "All uploaded.");
+						new Notice(
+							left
+								? t(left === 1 ? "archive.noticeStillWaitingOne" : "archive.noticeStillWaitingMany", { count: left })
+								: t("archive.noticeAllUploaded"),
+						);
 						this.display();
 					}),
 				);
@@ -163,7 +155,7 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 	private localLabel(): string {
 		const s = this.plugin.settings;
-		return s.archiveMode === "central" ? s.centralArchivePath : `<note folder>/${s.archiveDirName}`;
+		return s.archiveMode === "central" ? s.centralArchivePath : t("archive.localNoteFolder", { dir: s.archiveDirName });
 	}
 
 	private renderStaleArchives(containerEl: HTMLElement): void {
@@ -172,29 +164,26 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 		const target = this.plugin.settings.centralArchivePath;
 		const intro = new Setting(containerEl)
-			.setName("⚠ Stale central archives detected")
-			.setDesc(
-				`These folders contain the Archive Redirect marker but are not at the current central path (${target}). ` +
-					"They were likely created by a previous setting and are no longer being served. Move each one to the current path:",
-			);
+			.setName(t("archive.settingStale"))
+			.setDesc(t("archive.settingStaleDesc", { target }));
 		intro.settingEl.setCssStyles({ borderTop: "1px solid var(--background-modifier-border)" });
 
 		for (const s of stale) {
 			new Setting(containerEl)
 				.setName(s.folderPath + "/")
-				.setDesc(`Move into ${target}/`)
+				.setDesc(t("archive.staleMoveInto", { target }))
 				.addButton((b) =>
 					b
-						.setButtonText("Move here")
+						.setButtonText(t("archive.buttonMoveHere"))
 						.setWarning()
 						.onClick(async () => {
 							const r = await reconcile(this.app, s.folderPath, target);
 							if (r.ok) {
-								new Notice(`Moved ${r.from} → ${r.to}`);
+								new Notice(t("archive.noticeMoved", { from: r.from, to: r.to }));
 								this.display();
 							} else {
 								const tail = "detail" in r && r.detail ? `: ${r.detail}` : "";
-								new Notice(`Reconcile failed (${r.reason})${tail}`);
+								new Notice(t("archive.noticeReconcileFailed", { reason: r.reason, detail: tail }));
 							}
 						}),
 				);
@@ -203,8 +192,8 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 
 	private renderRest(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName("Auto-archive on file modify")
-			.setDesc("Scan and download new remote resources whenever a Markdown file is modified.")
+			.setName(t("archive.settingAutoArchive"))
+			.setDesc(t("archive.settingAutoArchiveDesc"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.autoArchiveOnModify).onChange(async (value) => {
 					this.plugin.settings.autoArchiveOnModify = value;
@@ -213,8 +202,8 @@ export class ArchiveSettingTab extends ModuleSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Included paths")
-			.setDesc("Only archive files under these vault-relative paths (one per line). Empty = entire vault.")
+			.setName(t("archive.settingIncludedPaths"))
+			.setDesc(t("archive.settingIncludedPathsDesc"))
 			.addTextArea((ta) => {
 				ta.setValue(this.plugin.settings.includedPaths.join("\n"));
 				ta.onChange(async (value) => {

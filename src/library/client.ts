@@ -1,4 +1,5 @@
 import { requestUrl, type RequestUrlResponse } from 'obsidian';
+import { t } from '../i18n';
 
 /** A media file in the library, as the server lists it. */
 export interface LibraryFile {
@@ -81,7 +82,7 @@ export class LibraryClient {
     try {
       r = await requestUrl({ url: this.url(vaultPath), throw: false });
     } catch {
-      throw new LibraryError(0, 'The Media One server cannot be reached.');
+      throw new LibraryError(0, t('library.unreachable'));
     }
     if (r.status !== 200) throw new LibraryError(r.status, `HTTP ${r.status}`);
     return r.text;
@@ -115,12 +116,12 @@ export class LibraryClient {
   }
 
   private async call(method: string, api: string, body?: string | ArrayBuffer, contentType?: string): Promise<RequestUrlResponse> {
-    if (!this.configured) throw new LibraryError(0, 'No Media One server is set.');
+    if (!this.configured) throw new LibraryError(0, t('library.noServer'));
     let r: RequestUrlResponse;
     try {
       r = await requestUrl({ url: `${this.server()}/api/${api}`, method, body, contentType, throw: false });
     } catch {
-      throw new LibraryError(0, 'The Media One server cannot be reached.');
+      throw new LibraryError(0, t('library.unreachable'));
     }
     if (r.status >= 400) {
       let message = `HTTP ${r.status}`;

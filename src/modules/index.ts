@@ -3,6 +3,7 @@ import { ModuleHost, ModulePlugin } from './module';
 import ArchiveRedirectPlugin from './archive/main';
 import HotlinkMediaPlugin from './hotlink/main';
 import AttentionPlugin from './attention/main';
+import { t } from '../i18n';
 
 /** A feature that was a plugin of its own before Media One took it in. */
 export interface ModuleInfo {
@@ -21,8 +22,8 @@ export const MODULES: ModuleInfo[] = [
   {
     key: 'attention',
     oldId: 'attention',
-    name: 'Annotations',
-    desc: 'Highlights and comments on notes, PDFs and transcripts, kept in a .anno.json beside the file. Formerly the Attention plugin.',
+    get name() { return t('modules.annotationsName'); },
+    get desc() { return t('modules.annotationsDesc'); },
     desktopOnly: false,
     onByDefault: true,
     create: host => new AttentionPlugin(host, 'attention'),
@@ -30,8 +31,8 @@ export const MODULES: ModuleInfo[] = [
   {
     key: 'archive',
     oldId: 'archive-redirect',
-    name: 'Web image archive',
-    desc: 'Saves the images a note links to and shows the saved copy, from your servers or a local folder. Formerly the Archive Redirect plugin.',
+    get name() { return t('modules.archiveName'); },
+    get desc() { return t('modules.archiveDesc'); },
     desktopOnly: false,
     onByDefault: false,
     create: host => new ArchiveRedirectPlugin(host, 'archive'),
@@ -39,8 +40,8 @@ export const MODULES: ModuleInfo[] = [
   {
     key: 'hotlink',
     oldId: 'hotlink-media',
-    name: 'Hotlink-protected media',
-    desc: 'Plays videos and images from sites that refuse requests from other pages (WeChat articles) by asking with the headers the site expects. Desktop only. Formerly the Hotlink Media plugin.',
+    get name() { return t('modules.hotlinkName'); },
+    get desc() { return t('modules.hotlinkDesc'); },
     desktopOnly: true,
     onByDefault: true,
     create: host => new HotlinkMediaPlugin(host, 'hotlink'),
@@ -78,14 +79,14 @@ export class Modules implements ModuleHost {
     for (const info of MODULES) {
       if (!(await this.isEnabled(info))) continue;
       if (info.desktopOnly && !Platform.isDesktopApp) {
-        this.skipped.set(info.key, 'Only available in the desktop app.');
+        this.skipped.set(info.key, t('modules.skipDesktopOnly'));
         continue;
       }
       if (this.oldPluginEnabled(info)) {
         // Both at once would handle every image or mark twice.
-        const why = `The ${info.oldId} plugin is still enabled. Disable it, then reload Media One.`;
+        const why = t('modules.skipOldPluginEnabled', { oldId: info.oldId });
         this.skipped.set(info.key, why);
-        new Notice(`Media One: ${info.name} is not running. ${why}`, 15000);
+        new Notice(t('modules.notRunningNotice', { name: info.name, why }), 15000);
         continue;
       }
       const module = info.create(this);

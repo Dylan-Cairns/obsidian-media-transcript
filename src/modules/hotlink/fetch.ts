@@ -13,7 +13,12 @@ export interface FetchedMedia {
 export interface FetchOptions {
 	attempts?: number;
 	sleep?: (ms: number) => Promise<void>;
+	/** 全被拒时的说明（会显示在媒体下方），默认是中文。 */
+	refusedMessage?: (rule: Rule, attempts: number, lastStatus: number) => string;
 }
+
+const defaultRefusedMessage = (rule: Rule, attempts: number, lastStatus: number) =>
+	`${rule.name}：试了 ${attempts} 次都被拒绝（最后一次 HTTP ${lastStatus}）`;
 
 const ok = (status: number) => status === 200 || status === 206;
 
@@ -21,7 +26,11 @@ export async function fetchMedia(
 	url: string,
 	rule: Rule,
 	ctx: RefreshContext,
-	{ attempts = 4, sleep = (ms) => new Promise((r) => window.setTimeout(r, ms)) }: FetchOptions = {},
+	{
+		attempts = 4,
+		sleep = (ms) => new Promise((r) => window.setTimeout(r, ms)),
+		refusedMessage = defaultRefusedMessage,
+	}: FetchOptions = {},
 ): Promise<FetchedMedia> {
 	let current = url;
 	let lastStatus = 0;
@@ -38,5 +47,5 @@ export async function fetchMedia(
 		}
 		if (i < attempts - 1) await sleep(400 * (i + 1));
 	}
-	throw new Error(`${rule.name}：试了 ${attempts} 次都被拒绝（最后一次 HTTP ${lastStatus}）`);
+	throw new Error(refusedMessage(rule, attempts, lastStatus));
 }

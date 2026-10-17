@@ -20,6 +20,7 @@ import { placeByLines, wholeBlocks } from './placeSelection';
 import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
+import { t } from '../../../../i18n';
 
 /**
  * Turns a selection in a markdown note into an annotation, via the right-click
@@ -405,7 +406,7 @@ export class MarkdownHost {
     });
     const range = found && toSource(plain, found.from, found.to);
     const anchor = range && this.anchorFor(source, range.from, range.to);
-    if (!anchor) new Notice('Attention: could not find that selection in the note.');
+    if (!anchor) new Notice(t('attention.noticeSelectionNotFound'));
     return anchor;
   }
 
@@ -462,14 +463,14 @@ export class MarkdownHost {
   private addCreateItems(menu: Menu, file: TFile, anchor: MarkdownAnchor): void {
     menu.addItem(item =>
       item
-        .setTitle('Mark')
+        .setTitle(t('attention.menuMark'))
         .setIcon('highlighter')
         .onClick(() => { void this.mark(file, anchor, null); }),
     );
 
     menu.addItem(item =>
       item
-        .setTitle('Comment…')
+        .setTitle(t('attention.menuComment'))
         .setIcon('message-square')
         .onClick(() => this.promptComment(file, anchor, '')),
     );
@@ -481,14 +482,14 @@ export class MarkdownHost {
 
     menu.addItem(item =>
       item
-        .setTitle('Edit comment…')
+        .setTitle(t('attention.menuEditComment'))
         .setIcon('message-square')
         .onClick(() => { void this.editComment(file, id); }),
     );
 
     menu.addItem(item =>
       item
-        .setTitle('Remove highlight')
+        .setTitle(t('attention.menuRemoveHighlight'))
         .setIcon('trash')
         .setWarning(true)
         .onClick(() => { void this.store.remove(file.path, id); }),
@@ -501,18 +502,18 @@ export class MarkdownHost {
   private addImageItems(menu: Menu, file: TFile, img: HTMLImageElement): void {
     const id = img.dataset.atId;
     if (id) {
-      menu.addItem(i => i.setTitle('Edit comment…').setIcon('message-square')
+      menu.addItem(i => i.setTitle(t('attention.menuEditComment')).setIcon('message-square')
         .onClick(() => { void this.editComment(file, id); }));
-      menu.addItem(i => i.setTitle('Mark again').setIcon('plus')
+      menu.addItem(i => i.setTitle(t('attention.menuMarkAgain')).setIcon('plus')
         .onClick(() => { void this.markAgain(file.path, id); }));
-      menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
+      menu.addItem(i => i.setTitle(t('attention.menuRemoveMark')).setIcon('trash').setWarning(true)
         .onClick(() => { void this.store.remove(file.path, id); }));
       return;
     }
 
-    menu.addItem(i => i.setTitle('Mark image').setIcon('highlighter')
+    menu.addItem(i => i.setTitle(t('attention.menuMarkImage')).setIcon('highlighter')
       .onClick(() => { void this.markImage(file, img, null); }));
-    menu.addItem(i => i.setTitle('Comment on image…').setIcon('message-square')
+    menu.addItem(i => i.setTitle(t('attention.menuCommentImage')).setIcon('message-square')
       .onClick(() => {
         new CommentModal(this.app, '🖼 ' + (img.getAttribute('alt') || 'image'), '', body => {
           void this.markImage(file, img, body || null);
@@ -532,7 +533,7 @@ export class MarkdownHost {
     const source = await this.app.vault.cachedRead(file);
     const embeds = findImageEmbeds(source);
     if (embeds.length === 0) {
-      new Notice('Attention: could not find that image in the note.');
+      new Notice(t('attention.noticeImageNotFound'));
       return;
     }
 
@@ -562,7 +563,7 @@ export class MarkdownHost {
     }
 
     if (!embed) {
-      new Notice('Attention: could not tell which image in the note that is.');
+      new Notice(t('attention.noticeImageAmbiguous'));
       return;
     }
     await this.mark(file, {
@@ -611,7 +612,7 @@ export class MarkdownHost {
 
   private async markAgain(targetPath: string, id: string): Promise<void> {
     const updated = await this.store.markAgain(targetPath, id);
-    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
+    if (updated) new Notice(t('attention.noticeMarkedTimes', { count: updated.hits.length }));
   }
 
   private async editComment(file: TFile, id: string): Promise<void> {
@@ -626,10 +627,10 @@ export class MarkdownHost {
   private async mark(file: TFile, anchor: MarkdownAnchor, body: string | null): Promise<void> {
     try {
       const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
-      if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
+      if (repeat) new Notice(t('attention.noticeMarkedTimes', { count: annotation.hits.length }));
     } catch (e) {
       if (!(e instanceof WrongNoteError)) throw e;
-      new Notice('Attention: that passage is not in this note — nothing was saved.');
+      new Notice(t('attention.noticePassageNotInNote'));
     }
   }
 }
