@@ -50,6 +50,8 @@ export default class MediaTranscriptPlugin extends Plugin {
   transcriptSync!: TranscriptSync;
   // The modules' part of data.json, kept beside the settings above.
   private moduleState: ModuleState = { modules: {}, enabledModules: {} };
+  // Uploads an earlier version queued in data.json; this device takes them over.
+  private legacyPending: string[] = [];
   mediaLocator!: MediaLocator;
   transcripts!: TranscriptIndex;
   private cards!: TranscriptCards;
@@ -61,6 +63,7 @@ export default class MediaTranscriptPlugin extends Plugin {
     this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
     this.library = new LibraryClient(() => this.settings.serverUrl, () => this.app.vault.getName());
     this.uploader = new Uploader(this);
+    this.uploader.adopt(this.legacyPending);
     this.uploader.start();
     this.transcriptSync = new TranscriptSync(this);
     this.transcriptSync.start();
@@ -521,10 +524,13 @@ export default class MediaTranscriptPlugin extends Plugin {
   async loadSettings() {
     // loadData() is typed `any`; narrow it so the merge stays type-checked.
     const saved = (await this.loadData()) as (Partial<MediaTranscriptSettings> & Partial<ModuleState>) | null;
-    const { modules, enabledModules, ...settings } = saved ?? {};
+    // Earlier versions kept this device's queue and progress in data.json, shared by Sync.
+    const { modules, enabledModules, pendingUploads, transcriptSyncSince: _t, ...settings } =
+      (saved ?? {}) as Partial<MediaTranscriptSettings> & Partial<ModuleState> & { pendingUploads?: string[]; transcriptSyncSince?: number };
     this.settings = Object.assign({}, DEFAULT_SETTINGS, settings);
     this.moduleState.modules = modules ?? {};
     this.moduleState.enabledModules = enabledModules ?? {};
+    this.legacyPending = pendingUploads ?? [];
   }
 
   async saveSettings() {

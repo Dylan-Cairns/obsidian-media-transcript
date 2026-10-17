@@ -1,6 +1,7 @@
 import { Platform, TFile, normalizePath } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import type { Job } from './client';
+import { DeviceState } from './deviceState';
 
 const EVERY_MS = 2 * 60_000;
 // On a phone, leave a fresh transcript to the computer for a while: two
@@ -18,8 +19,11 @@ const OVERLAP_S = 120;
 export class TranscriptSync {
   private running = false;
   private jobs: Job[] = [];
+  private readonly device: DeviceState;
 
-  constructor(private readonly plugin: MediaTranscriptPlugin) {}
+  constructor(private readonly plugin: MediaTranscriptPlugin) {
+    this.device = new DeviceState(plugin.app);
+  }
 
   start(): void {
     const { plugin } = this;
@@ -38,7 +42,7 @@ export class TranscriptSync {
     this.running = true;
     let written = 0;
     try {
-      const since = plugin.settings.transcriptSyncSince;
+      const since = this.device.get<number>('transcriptSyncSince', 0);
       const { jobs, now } = await plugin.library.jobs(since ? since - OVERLAP_S : undefined);
       this.remember(jobs);
       let next = now;
@@ -50,8 +54,7 @@ export class TranscriptSync {
         }
         written += await this.bring(job);
       }
-      plugin.settings.transcriptSyncSince = next;
-      await plugin.saveSettings();
+      this.device.set('transcriptSyncSince', next);
     } catch (e) {
       console.warn('[media-one] transcript sync:', e);
     } finally {

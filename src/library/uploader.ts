@@ -1,6 +1,7 @@
 import { Notice, TAbstractFile, TFile } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import { sha256Hex } from './client';
+import { DeviceState } from './deviceState';
 
 // A recording still being written grows; wait until it stops.
 const SETTLE_MS = 3000;
@@ -14,12 +15,30 @@ const MAX_BYTES = 1024 * 1024 * 1024;
  * vault: removing it is left to the offload step, which waits for a backup.
  *
  * Files that can't be uploaded now (no server, no network) wait in a queue
- * kept in the settings and are retried every 10 minutes and at startup.
+ * kept on this device and are retried every 10 minutes and at startup.
  */
 export class Uploader {
   private running = false;
+  private readonly device: DeviceState;
+  /** Vault paths this device still has to upload. */
+  readonly pending: string[];
 
-  constructor(private readonly plugin: MediaTranscriptPlugin) {}
+  constructor(private readonly plugin: MediaTranscriptPlugin) {
+    this.device = new DeviceState(plugin.app);
+    this.pending = this.device.get<string[]>('pendingUploads', []);
+  }
+
+  /** Take over paths queued elsewhere (an older version's settings); missing files are skipped when uploading. */
+  adopt(paths: string[]): void {
+    const fresh = paths.filter(p => !this.pending.includes(p));
+    if (fresh.length === 0) return;
+    this.pending.push(...fresh);
+    this.keep();
+  }
+
+  private keep(): void {
+    this.device.set('pendingUploads', this.pending);
+  }
 
   start(): void {
     const { plugin } = this;
@@ -31,10 +50,6 @@ export class Uploader {
       void this.flush();
     });
     plugin.registerInterval(window.setInterval(() => void this.flush(), RETRY_MS));
-  }
-
-  get pending(): string[] {
-    return this.plugin.settings.pendingUploads;
   }
 
   private enabled(): boolean {
@@ -50,20 +65,20 @@ export class Uploader {
     const i = this.pending.indexOf(oldPath);
     if (i < 0) return;
     this.pending[i] = file.path;
-    void this.plugin.saveSettings();
+    this.keep();
   }
 
   private forget(path: string): void {
     const i = this.pending.indexOf(path);
     if (i < 0) return;
     this.pending.splice(i, 1);
-    void this.plugin.saveSettings();
+    this.keep();
   }
 
   async enqueue(path: string): Promise<void> {
     if (!this.pending.includes(path)) {
       this.pending.push(path);
-      await this.plugin.saveSettings();
+      this.keep();
     }
     await this.flush();
   }
