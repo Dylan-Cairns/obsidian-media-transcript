@@ -10,6 +10,7 @@ import { parseTimeFragment } from './utils/timeFragment';
 import { MediaLocator } from './mediaLocator';
 import { TranscriptIndex } from './transcriptIndex';
 import { LinkMediaModal } from './linkMediaModal';
+import { Modules, ModuleState } from './modules';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -38,6 +39,9 @@ function viewRegistry(app: App): ViewRegistry {
 
 export default class MediaTranscriptPlugin extends Plugin {
   settings!: MediaTranscriptSettings;
+  modules!: Modules;
+  // The modules' part of data.json, kept beside the settings above.
+  private moduleState: ModuleState = { modules: {}, enabledModules: {} };
   mediaLocator!: MediaLocator;
   transcripts!: TranscriptIndex;
   private cards!: TranscriptCards;
@@ -83,7 +87,7 @@ export default class MediaTranscriptPlugin extends Plugin {
         if (file instanceof TFile && (this.isMedia(file) || this.isSubtitle(file))) {
           menu.addItem(item =>
             item
-              .setTitle('Open in Media Transcript')
+              .setTitle('Open in Media One')
               .setIcon('play-circle')
               .onClick(() => { void this.openInView(file); }),
           );
@@ -155,6 +159,9 @@ export default class MediaTranscriptPlugin extends Plugin {
     this.routeMediaLinks();
 
     this.addSettingTab(new MediaTranscriptSettingTab(this.app, this));
+
+    this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
+    await this.modules.start();
   }
 
   /**
@@ -428,11 +435,14 @@ export default class MediaTranscriptPlugin extends Plugin {
 
   async loadSettings() {
     // loadData() is typed `any`; narrow it so the merge stays type-checked.
-    const saved = (await this.loadData()) as Partial<MediaTranscriptSettings> | null;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, saved ?? {});
+    const saved = (await this.loadData()) as (Partial<MediaTranscriptSettings> & Partial<ModuleState>) | null;
+    const { modules, enabledModules, ...settings } = saved ?? {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, settings);
+    this.moduleState.modules = modules ?? {};
+    this.moduleState.enabledModules = enabledModules ?? {};
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData({ ...this.settings, ...this.moduleState });
   }
 }

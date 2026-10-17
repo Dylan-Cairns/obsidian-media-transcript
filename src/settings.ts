@@ -1,4 +1,5 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { MODULES } from './modules';
 import type MediaTranscriptPlugin from './main';
 import { parseFolderList } from './utils/mediaMatch';
 import {
@@ -73,6 +74,8 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     // Obsidian shows the plugin name as the heading automatically.
+    this.displayModuleSwitches(containerEl);
+
     new Setting(containerEl).setName('Subtitles').setHeading();
 
     new Setting(containerEl)
@@ -227,5 +230,55 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
           }
         }),
       );
+
+    // Each running module's own settings, in a section of their own.
+    for (const info of MODULES) {
+      const tab = this.plugin.modules?.loaded.get(info.key)?.settingTab;
+      if (!tab) continue;
+      new Setting(containerEl).setName(info.name).setHeading();
+      tab.containerEl = containerEl.createDiv('mt-module-settings');
+      tab.display();
+    }
+  }
+
+  /** Which of the features that used to be separate plugins are on. */
+  private displayModuleSwitches(containerEl: HTMLElement): void {
+    const modules = this.plugin.modules;
+    if (!modules) return;
+    new Setting(containerEl).setName('Modules').setHeading();
+    let changed = false;
+    const reload = new Setting(containerEl)
+      .setName('Reload to apply')
+      .setDesc('Modules switched on or off start or stop when Media One reloads.')
+      .addButton(b => b.setButtonText('Reload Media One').setCta().onClick(() => { void this.reloadPlugin(); }));
+    reload.settingEl.hide();
+    for (const info of MODULES) {
+      const setting = new Setting(containerEl).setName(info.name).setDesc(info.desc);
+      const why = modules.skipped.get(info.key);
+      if (why) setting.descEl.createDiv({ cls: 'mod-warning', text: why });
+      setting.addToggle(t => {
+        t.setValue(modules.chosen(info.key));
+        t.onChange(async on => {
+          await modules.setEnabled(info.key, on);
+          if (!changed) {
+            changed = true;
+            reload.settingEl.show();
+          }
+        });
+      });
+    }
+    // The switches above the button they apply with.
+    containerEl.appendChild(reload.settingEl);
+  }
+
+  private async reloadPlugin(): Promise<void> {
+    const plugins = (this.app as unknown as { plugins?: { disablePlugin(id: string): Promise<void>; enablePlugin(id: string): Promise<boolean> } }).plugins;
+    const id = this.plugin.manifest.id;
+    if (!plugins) {
+      new Notice('Reload Obsidian to apply the change.');
+      return;
+    }
+    await plugins.disablePlugin(id);
+    await plugins.enablePlugin(id);
   }
 }

@@ -550,3 +550,564 @@ video.mt-media {
   width: 100%;
   max-height: 60vh;
 }
+
+/* ── Module settings ──────────────────────────────────────────────────────── */
+
+.mt-module-settings {
+  padding-left: var(--size-4-3);
+  border-left: 2px solid var(--background-modifier-border);
+  margin-bottom: var(--size-4-6);
+}
+
+/* ══ Annotations module (formerly the Attention plugin) ══════════════════════ */
+
+/* ── Review panel ──────────────────────────────────────────────────────────── */
+
+.at-review {
+  padding: 0 12px 40px;
+}
+
+.at-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  position: sticky;
+  top: 0;
+  background: var(--background-secondary);
+  z-index: 1;
+}
+
+.at-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.at-tab {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 9px;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.at-tab.is-active,
+.at-btn.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  font-weight: var(--font-medium);
+}
+
+.at-review-total {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.at-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+/* Sort control sits under the tabs, not beside them: the header is already
+   carrying two controls and a third would crowd a narrow sidebar. */
+.at-sortbar {
+  padding: 4px 0 2px;
+}
+
+.at-sort {
+  width: 100%;
+  font-size: var(--font-ui-smaller);
+  height: auto;
+  padding: 3px 6px;
+}
+
+.at-bucket-title {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin: 16px 0 6px;
+}
+
+/* One marked passage. The colour of the stripe is the highlight colour. */
+.at-entry {
+  border-left: 3px solid var(--at-color, var(--text-accent));
+  padding: 6px 0 6px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  border-radius: 0 4px 4px 0;
+}
+
+.at-entry:hover {
+  background: var(--background-modifier-hover);
+}
+
+.at-quote {
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+.at-body {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+.at-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+/* The name gives up space first — it's the variable-length half. */
+.at-meta-left {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.at-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Times keep their full width so they line up down the list. */
+.at-meta-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.at-time,
+.at-when {
+  font-variant-numeric: tabular-nums;
+}
+
+.at-empty {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  padding: 24px 0;
+  line-height: 1.6;
+}
+
+/* ── Highlights painted onto a host surface ────────────────────────────────── */
+
+/* Default: an underline. Marks are meant to be many, and a filled block both
+   drowns the page and looks like Obsidian's own ==highlight== — which lives in
+   the note, unlike these. An underline also leaves the selection layer alone. */
+.at-hl {
+  box-shadow: inset 0 -0.18em 0 0 var(--at-color, #f5c542);
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+
+.at-hl:hover {
+  box-shadow: inset 0 -0.32em 0 0 var(--at-color, #f5c542);
+}
+
+/* An annotation you wrote something about earns more weight than a bare mark. */
+.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 18%, transparent);
+  border-radius: 2px;
+}
+
+/* Opt-in fill. Translucent on purpose: an opaque background sits on top of the
+   browser's selection colour, which is painted behind the text, so with a solid
+   fill the text still selects — it just doesn't *look* selected. */
+body.at-style-background .at-hl {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 42%, transparent);
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+body.at-style-background .at-hl:hover {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 62%, transparent);
+  box-shadow: none;
+}
+
+/* On a PDF, a mark is a rectangle PDF++ placed over the text, in a layer of
+   its own above the page. The pointer passes through it so the text beneath
+   still selects; the host finds a mark under a click by position instead. The
+   fill blends with the page rather than covering it. */
+.pdf-plus-backlink-highlight-layer .at-pdf-hl {
+  position: absolute;
+  pointer-events: none;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--at-color, #f5c542) 38%, transparent);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.theme-dark .pdf-plus-backlink-highlight-layer .at-pdf-hl {
+  mix-blend-mode: screen;
+}
+
+/* A region — a figure, a table — is outlined rather than filled: a fill over
+   a picture tints the picture, and the outline is what says "this part". */
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-pdf-region {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 10%, transparent);
+  outline: 2px solid var(--at-color, #f5c542);
+  outline-offset: 2px;
+  mix-blend-mode: normal;
+}
+
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 55%, transparent);
+}
+
+/* Make selection unmistakable either way. */
+.at-hl::selection {
+  background: var(--text-selection);
+}
+
+/* ── Comment bubble (clicking a highlight) ─────────────────────────────────── */
+
+.at-bubble {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+}
+
+.at-bubble-body {
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.at-bubble-empty {
+  font-size: var(--font-ui-small);
+  color: var(--text-faint);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.at-bubble-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Times a passage has caught you, listed in the bubble. */
+.at-bubble-hits {
+  margin-bottom: 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.at-hit-count {
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+}
+
+.at-hit-time {
+  padding-left: 8px;
+}
+
+.at-pop-mark {
+  font-weight: var(--font-medium);
+}
+
+.at-when {
+  color: var(--text-faint);
+}
+
+/* Repeat count in the review panel. */
+.at-hits {
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.at-entry {
+  position: relative;
+  border-left-color: var(--at-color, var(--text-accent));
+}
+
+/* Row actions stay out of the way until you're pointing at the entry, so a
+   long list reads as a list rather than a control panel. */
+.at-entry-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  gap: 2px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  padding: 1px;
+}
+
+.at-entry:hover .at-entry-actions,
+.at-entry:focus-within .at-entry-actions {
+  display: flex;
+}
+
+.at-icon-btn {
+  padding: 1px 5px;
+  height: 20px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
+}
+
+.at-icon-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.at-icon-btn.mod-warning:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+}
+
+/* Marks whose text is gone. Dimmed and struck through: still here, plainly not
+   pointing at anything. */
+.at-lost-title {
+  color: var(--text-error);
+}
+
+.at-entry-lost {
+  border-left-style: dashed;
+  border-left-color: var(--text-faint);
+  cursor: default;
+  opacity: 0.75;
+}
+
+.at-entry-lost .at-quote {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.at-entry-lost:hover {
+  opacity: 1;
+}
+
+/* Briefly ring an annotation the review panel jumped to. */
+@keyframes at-flash {
+  from { box-shadow: 0 0 0 3px var(--text-accent); }
+  to   { box-shadow: 0 0 0 3px transparent; }
+}
+
+.at-flash {
+  animation: at-flash 1.2s ease-out;
+  border-radius: 3px;
+}
+
+/* ── Selection popover ─────────────────────────────────────────────────────── */
+
+.at-popover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+}
+
+.at-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.at-swatch:hover {
+  transform: scale(1.15);
+}
+
+.at-pop-btn {
+  padding: 0 6px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  background: transparent;
+}
+
+.at-pop-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* ── Comment modal ─────────────────────────────────────────────────────────── */
+
+.at-comment-quote {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  border-left: 3px solid var(--text-accent);
+  padding-left: 10px;
+  margin-bottom: 12px;
+  max-height: 6em;
+  overflow-y: auto;
+}
+
+.at-comment-input {
+  width: 100%;
+  min-height: 7em;
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* ── Marked images ─────────────────────────────────────────────────────────── */
+
+/* A picture can't be underlined, so it gets a ring. Inset, so a marked image
+   doesn't shift the text around it. */
+.at-img {
+  outline: 3px solid var(--at-color, #f5c542);
+  outline-offset: -3px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.at-img-comment {
+  outline-style: double;
+  outline-width: 5px;
+}
+
+.at-img:hover {
+  outline-color: var(--interactive-accent);
+}
+
+/* ── Panel entries: thumbnails and long text ───────────────────────────────── */
+
+/* An image mark shows the picture, not the embed that produced it. */
+.at-thumb img {
+  max-width: 100%;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  border-radius: 3px;
+  display: block;
+}
+
+.at-thumb p {
+  margin: 0;
+}
+
+/* A quote can be a URL with no spaces in it, which would otherwise push the
+   panel wider than the sidebar and scroll the whole thing sideways. */
+.at-quote,
+.at-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Long quotes are trimmed rather than allowed to fill the panel; the whole
+   thing is one click away in the note. */
+.at-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.at-review {
+  overflow-x: hidden;
+}
+
+/* A folder rule is two inputs and a delete, not a named setting — the name
+   column would be empty on every row. */
+.at-folder-rule {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.at-folder-rule .setting-item-info {
+  display: none;
+}
+
+.at-folder-rule .setting-item-control input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Touch ─────────────────────────────────────────────────────────────────
+   A phone has no pointer to hover with, so anything that appears on hover is
+   simply unreachable there. The row's actions are shown outright instead —
+   a list of marks is short enough that they do not crowd it, and without them
+   the only way to act on a mark would be to go and find it in the note. */
+.is-mobile .at-entry-actions {
+  display: flex;
+}
+
+.is-mobile .at-icon-btn {
+  /* Comfortably larger than a fingertip's worth of certainty. */
+  height: 30px;
+  min-width: 30px;
+  font-size: 14px;
+}
+
+/* The popover is placed against a selection the reader made with a finger,
+   which their hand may still be over; a little more room makes it tappable. */
+.is-mobile .at-popover,
+.is-mobile .at-bubble {
+  font-size: var(--font-ui-medium);
+}
+
+.is-mobile .at-pop-btn {
+  height: 34px;
+  min-width: 34px;
+}
+
+/* A picture is ringed rather than underlined, so the flash needs to sit
+   outside it — on a span the box-shadow overlaps the text and reads fine, but
+   on an image it would be hidden behind the picture itself. */
+img.at-flash {
+  outline: 3px solid var(--text-accent);
+  outline-offset: 2px;
+  animation: at-flash-outline 1.2s ease-out;
+}
+
+@keyframes at-flash-outline {
+  from { outline-color: var(--text-accent); }
+  to   { outline-color: transparent; }
+}
+
+/* A region of a PDF in the review panel: the picture, cut from its page. */
+.at-thumb-pdf {
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.at-quote-region {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-pdf-region.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 16%, transparent);
+}
+
+/* ══ Hotlink-protected media module (formerly the Hotlink Media plugin) ══════ */
+
+.hotlink-media-failed {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin: 0.25em 0 1em;
+}

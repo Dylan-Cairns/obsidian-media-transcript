@@ -1,9 +1,9 @@
 {
 	"id": "media-transcript",
-	"name": "Media Transcript",
+	"name": "Media One",
 	"version": "1.5.3",
-	"minAppVersion": "1.4.0",
-	"description": "Play video/audio with synchronized, clickable transcripts. Click any line to seek; playing line auto-highlights.",
+	"minAppVersion": "1.7.2",
+	"description": "Your vault's media in one place: play audio and video with clickable transcripts, highlight and comment on notes, PDFs and transcripts, archive web images, and play hotlink-protected media.",
 	"author": "semsevens",
 	"authorUrl": "https://github.com/semsevens",
 	"isDesktopOnly": false

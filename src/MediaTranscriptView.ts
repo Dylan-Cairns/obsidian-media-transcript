@@ -79,7 +79,7 @@ export class MediaTranscriptView extends FileView {
 
   getViewType() { return VIEW_TYPE_MEDIA_TRANSCRIPT; }
   getDisplayText() {
-    return this.media?.basename ?? this.file?.basename ?? 'Media Transcript';
+    return this.media?.basename ?? this.file?.basename ?? 'Media One';
   }
 
   /** The media being played (for a subtitle file opened directly, its media). */
@@ -409,7 +409,7 @@ export class MediaTranscriptView extends FileView {
     note.setAttribute(
       'title',
       'Looked in:\n' + this.searched.map(s => '• ' + s).join('\n') +
-        '\n\nAdd folders under Settings → Media Transcript → Media folders.',
+        '\n\nAdd folders under Settings → Media One → Media folders.',
     );
     const file = this.file;
     if (!file) return;
