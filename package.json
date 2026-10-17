@@ -15,8 +15,6 @@
   "author": "semsevens",
   "license": "MIT",
   "devDependencies": {
-    "@codemirror/state": "^6.7.6",
-    "@codemirror/view": "^6.43.14",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^24.0.0",
     "esbuild": "0.17.3",
