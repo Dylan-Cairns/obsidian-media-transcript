@@ -27,6 +27,27 @@ reads recordings from `<server>/library` and shares the web image archive throug
 address replaces those entries. Any server that serves files over HTTP works for `/library`;
 `/archive` must accept `PUT` of new files (WebDAV works).
 
+### Media library
+
+With a server set, **Open media library** (ribbon or command) lists the vault's media on the
+server, by folder, like a folder you can't run out of:
+
+- **Play** a file: its transcript opens if the vault has one, else it plays in the panel.
+- **Rename or move** it. The server renames the file with its transcripts and annotations, and
+  Media One updates the vault: every note's embeds and links to it, its transcripts (renamed,
+  and told the new name) and its `.anno.json`. Works whether or not the file is still on this
+  device.
+- **Delete** it. It goes to the server's trash, with its transcripts, for 30 days; restore it
+  from the *Trash* section at the bottom. Notes keep their links.
+
+**Upload new media to the server** (off by default) uploads a recording or video as soon as it
+is added to the vault, checked by sha256 on the server, so every device can play it. The file
+stays in the vault. Without a connection it waits, and is retried every 10 minutes. *Upload to
+Media One server* in a media file's menu does it by hand.
+
+The server needs the library API (`/api/files`, `/api/upload`, `/api/rename`, `/api/delete`,
+`/api/restore`, `/api/trash`); a plain file server only offers playback.
+
 ## Coming from the separate plugins
 
 1. Update Media Transcript to 2.0 (it keeps its id, `media-transcript`, so it updates in place).

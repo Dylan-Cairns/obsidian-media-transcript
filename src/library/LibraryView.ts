@@ -1,0 +1,270 @@
+import { App, ItemView, Menu, Modal, Notice, Setting, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import type MediaTranscriptPlugin from '../main';
+import type { LibraryFile, TrashItem } from './client';
+import { deleteMedia, renameMedia, restoreMedia } from './actions';
+
+export const VIEW_TYPE_LIBRARY = 'media-one-library';
+
+/**
+ * The library on the Media One server, as a folder: play, rename, move and
+ * delete media that may no longer be on this device, and restore it from the
+ * server's trash.
+ */
+export class LibraryView extends ItemView {
+  private files: LibraryFile[] = [];
+  private trashItems: TrashItem[] = [];
+  private filter = '';
+  private error: string | null = null;
+  private listEl!: HTMLElement;
+  private statusEl!: HTMLElement;
+  private playing: HTMLElement | null = null;
+
+  constructor(leaf: WorkspaceLeaf, private readonly plugin: MediaTranscriptPlugin) {
+    super(leaf);
+  }
+
+  getViewType(): string {
+    return VIEW_TYPE_LIBRARY;
+  }
+
+  getDisplayText(): string {
+    return 'Media library';
+  }
+
+  getIcon(): string {
+    return 'library';
+  }
+
+  async onOpen(): Promise<void> {
+    const root = this.contentEl;
+    root.empty();
+    root.addClass('mo-lib');
+    const bar = root.createDiv('mo-lib-bar');
+    const search = bar.createEl('input', { type: 'search', placeholder: 'Filter by name or folder', cls: 'mo-lib-search' });
+    search.addEventListener('input', () => {
+      this.filter = search.value.trim().toLowerCase();
+      this.renderList();
+    });
+    const refresh = bar.createEl('button', { cls: 'clickable-icon mo-lib-refresh', attr: { 'aria-label': 'Refresh' } });
+    setIcon(refresh, 'refresh-cw');
+    refresh.addEventListener('click', () => { void this.refresh(); });
+    this.statusEl = root.createDiv('mo-lib-status');
+    this.listEl = root.createDiv('mo-lib-list');
+    await this.refresh();
+  }
+
+  async onClose(): Promise<void> {
+    this.stopPlaying();
+  }
+
+  async refresh(): Promise<void> {
+    const { library } = this.plugin;
+    if (!library.configured) {
+      this.error = 'Set your Media One server in the settings to see its library.';
+      this.files = [];
+      this.trashItems = [];
+    } else {
+      try {
+        [this.files, this.trashItems] = await Promise.all([library.files(), library.trash()]);
+        this.error = null;
+      } catch (e) {
+        this.error = (e as Error).message;
+      }
+    }
+    this.renderList();
+  }
+
+  private renderList(): void {
+    const { listEl, statusEl } = this;
+    listEl.empty();
+    statusEl.empty();
+    const waiting = this.plugin.uploader.pending.length;
+    if (this.error) {
+      statusEl.createSpan({ cls: 'mo-lib-error', text: this.error });
+    } else {
+      const size = this.files.reduce((n, f) => n + f.size, 0);
+      statusEl.setText(`${this.files.length} files on the server, ${formatSize(size)}` +
+        (waiting ? ` · ${waiting} waiting to upload` : ''));
+    }
+
+    const shown = this.files
+      .filter(f => !this.filter || f.vaultPath.toLowerCase().includes(this.filter))
+      .sort((a, b) => a.vaultPath.localeCompare(b.vaultPath));
+    let folder: string | null = null;
+    for (const f of shown) {
+      const dir = f.vaultPath.includes('/') ? f.vaultPath.slice(0, f.vaultPath.lastIndexOf('/')) : '/';
+      if (dir !== folder) {
+        folder = dir;
+        listEl.createDiv({ cls: 'mo-lib-folder', text: dir });
+      }
+      this.renderRow(listEl, f);
+    }
+    if (!this.error && shown.length === 0) {
+      listEl.createDiv({ cls: 'mo-lib-empty', text: this.filter ? 'Nothing matches.' : 'No media on the server yet.' });
+    }
+
+    if (this.trashItems.length > 0) {
+      const details = listEl.createEl('details', { cls: 'mo-lib-trash' });
+      details.createEl('summary', { text: `Trash (${this.trashItems.length}) — kept 30 days` });
+      for (const t of [...this.trashItems].sort((a, b) => b.trashed.localeCompare(a.trashed))) {
+        const row = details.createDiv('mo-lib-row');
+        const main = row.createDiv('mo-lib-main');
+        main.createDiv({ cls: 'mo-lib-name', text: t.path.slice(t.path.indexOf('/') + 1) });
+        main.createDiv({ cls: 'mo-lib-meta', text: `deleted ${t.trashed.replace('T', ' ')}` });
+        const restore = row.createEl('button', { text: 'Restore', cls: 'mo-lib-restore' });
+        restore.addEventListener('click', () => { void this.restore(t); });
+      }
+    }
+  }
+
+  private renderRow(parent: HTMLElement, f: LibraryFile): void {
+    const row = parent.createDiv('mo-lib-row');
+    row.dataset.path = f.vaultPath;
+    const main = row.createDiv('mo-lib-main');
+    main.createDiv({ cls: 'mo-lib-name', text: nameOf(f.vaultPath) });
+    const meta = main.createDiv('mo-lib-meta');
+    meta.appendText(`${formatSize(f.size)}${f.added ? ' · ' + f.added.slice(0, 10) : ''}`);
+    if (this.plugin.transcripts.transcriptsFor(nameOf(f.vaultPath)).length > 0) {
+      meta.createSpan({ cls: 'mo-lib-badge', text: 'transcript' });
+    }
+    if (this.plugin.app.vault.getAbstractFileByPath(f.vaultPath) instanceof TFile) {
+      meta.createSpan({ cls: 'mo-lib-badge', text: 'on this device' });
+    }
+    main.addEventListener('click', () => { void this.play(f, row); });
+
+    const actions = row.createDiv('mo-lib-actions');
+    const rename = actions.createEl('button', { cls: 'clickable-icon mo-lib-rename', attr: { 'aria-label': 'Rename or move' } });
+    setIcon(rename, 'pencil');
+    rename.addEventListener('click', () => this.askRename(f));
+    const del = actions.createEl('button', { cls: 'clickable-icon mo-lib-delete', attr: { 'aria-label': 'Delete' } });
+    setIcon(del, 'trash-2');
+    del.addEventListener('click', () => this.askDelete(f));
+
+    row.addEventListener('contextmenu', evt => {
+      const menu = new Menu();
+      menu.addItem(i => i.setTitle('Play').setIcon('play').onClick(() => { void this.play(f, row); }));
+      menu.addItem(i => i.setTitle('Rename or move…').setIcon('pencil').onClick(() => this.askRename(f)));
+      menu.addItem(i => i.setTitle('Copy embed').setIcon('copy').onClick(() => {
+        void navigator.clipboard.writeText(`![[${nameOf(f.vaultPath)}]]`);
+        new Notice('Copied');
+      }));
+      menu.addItem(i => i.setTitle('Delete').setIcon('trash-2').setWarning(true).onClick(() => this.askDelete(f)));
+      menu.showAtMouseEvent(evt);
+    });
+  }
+
+  /** Open its transcript if there is one; else play it right here. */
+  private async play(f: LibraryFile, row: HTMLElement): Promise<void> {
+    const transcript = this.plugin.transcripts.transcriptsFor(nameOf(f.vaultPath))[0];
+    if (transcript) {
+      await this.plugin.openTranscript(transcript);
+      return;
+    }
+    this.stopPlaying();
+    const holder = row.createDiv('mo-lib-player');
+    const audio = holder.createEl('audio', { attr: { controls: '', src: this.plugin.library.url(f.vaultPath) } });
+    this.playing = holder;
+    void audio.play().catch(() => { /* the controls are there to try again */ });
+  }
+
+  private stopPlaying(): void {
+    if (!this.playing) return;
+    this.playing.querySelector('audio')?.pause();
+    this.playing.remove();
+    this.playing = null;
+  }
+
+  askRename(f: LibraryFile): void {
+    new RenameModal(this.app, f.vaultPath, async to => {
+      try {
+        await renameMedia(this.plugin, f.vaultPath, to);
+        new Notice(`Renamed to ${to}`);
+      } catch (e) {
+        new Notice(`Could not rename: ${(e as Error).message}`);
+      }
+      await this.refresh();
+    }).open();
+  }
+
+  askDelete(f: LibraryFile): void {
+    new ConfirmModal(this.app, `Delete ${nameOf(f.vaultPath)}?`,
+      'It moves to the server\'s trash, with its transcripts there, and can be restored for 30 days. ' +
+      'Notes that embed it keep their links.',
+      'Delete', async () => {
+        try {
+          await deleteMedia(this.plugin, f.vaultPath);
+          new Notice(`Deleted ${nameOf(f.vaultPath)}`);
+        } catch (e) {
+          new Notice(`Could not delete: ${(e as Error).message}`);
+        }
+        await this.refresh();
+      }).open();
+  }
+
+  private async restore(t: TrashItem): Promise<void> {
+    try {
+      const path = await restoreMedia(this.plugin, t.id);
+      new Notice(`Restored ${path}`);
+    } catch (e) {
+      new Notice(`Could not restore: ${(e as Error).message}`);
+    }
+    await this.refresh();
+  }
+}
+
+export class RenameModal extends Modal {
+  constructor(app: App, private readonly current: string, private readonly onSubmit: (to: string) => Promise<void>) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.setTitle('Rename or move');
+    let value = this.current;
+    const submit = () => {
+      const to = value.trim();
+      this.close();
+      if (to && to !== this.current) void this.onSubmit(to);
+    };
+    new Setting(this.contentEl)
+      .setName('New path')
+      .setDesc('A new name, or a folder and name, inside the vault. Keep the extension.')
+      .addText(t => {
+        t.setValue(value).onChange(v => { value = v; });
+        t.inputEl.addClass('mo-lib-rename-input');
+        t.inputEl.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+        // Select the name without the extension, ready to type over.
+        const start = value.lastIndexOf('/') + 1;
+        const end = value.lastIndexOf('.') > start ? value.lastIndexOf('.') : value.length;
+        window.setTimeout(() => { t.inputEl.focus(); t.inputEl.setSelectionRange(start, end); }, 0);
+      });
+    new Setting(this.contentEl).addButton(b => b.setButtonText('Rename').setCta().onClick(submit));
+  }
+}
+
+export class ConfirmModal extends Modal {
+  constructor(app: App, private readonly heading: string, private readonly body: string,
+    private readonly confirm: string, private readonly onConfirm: () => Promise<void>) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.setTitle(this.heading);
+    this.contentEl.createEl('p', { text: this.body });
+    new Setting(this.contentEl)
+      .addButton(b => b.setButtonText('Cancel').onClick(() => this.close()))
+      .addButton(b => b.setButtonText(this.confirm).setWarning().onClick(() => {
+        this.close();
+        void this.onConfirm();
+      }));
+  }
+}
+
+function nameOf(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+function formatSize(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}

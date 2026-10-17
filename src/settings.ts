@@ -18,6 +18,10 @@ export interface MediaTranscriptSettings {
   // ── Media One server ─────────────────────────────────────────────────────
   // Its address; the modules' own lists hold what it stands for.
   serverUrl: string;
+  // Upload media added to the vault to the server at once.
+  uploadNewMedia: boolean;
+  // Vault paths waiting to be uploaded (no server or network when added).
+  pendingUploads: string[];
 
   // ── Subtitle matching ────────────────────────────────────────────────────
   subtitleDirectory: string;
@@ -50,6 +54,8 @@ export interface MediaTranscriptSettings {
 
 export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   serverUrl: '',
+  uploadNewMedia: false,
+  pendingUploads: [],
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],
@@ -267,6 +273,21 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
           await this.plugin.setServer(value);
           new Notice(this.plugin.settings.serverUrl ? `Media One server: ${this.plugin.settings.serverUrl}` : 'Media One server removed.');
           this.display();
+        }),
+      );
+    new Setting(containerEl)
+      .setName('Upload new media to the server')
+      .setDesc(
+        'Recordings and videos added to the vault are uploaded to the server right away (checked by sha256), ' +
+          'so every device can play them. The file stays in the vault. Without a connection it waits and is ' +
+          'retried every 10 minutes.' +
+          (this.plugin.settings.pendingUploads.length ? ` Waiting now: ${this.plugin.settings.pendingUploads.length}.` : ''),
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.uploadNewMedia).onChange(async v => {
+          this.plugin.settings.uploadNewMedia = v;
+          await this.plugin.saveSettings();
+          if (v) void this.plugin.uploader.flush();
         }),
       );
   }

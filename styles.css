@@ -1111,3 +1111,104 @@ img.at-flash {
 	color: var(--text-muted);
 	margin: 0.25em 0 1em;
 }
+
+/* ── Media library panel ───────────────────────────────────────────────────── */
+
+.mo-lib {
+  padding: var(--size-4-2);
+}
+
+.mo-lib-bar {
+  display: flex;
+  gap: var(--size-4-2);
+  align-items: center;
+}
+
+.mo-lib-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.mo-lib-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin: var(--size-4-2) 0;
+}
+
+.mo-lib-error {
+  color: var(--text-error);
+}
+
+.mo-lib-folder {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  margin: var(--size-4-3) 0 var(--size-4-1);
+  overflow-wrap: anywhere;
+}
+
+.mo-lib-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+}
+
+.mo-lib-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.mo-lib-main {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.mo-lib-name {
+  overflow-wrap: anywhere;
+}
+
+.mo-lib-meta {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.mo-lib-badge {
+  margin-left: var(--size-4-2);
+  padding: 0 var(--size-4-1);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.mo-lib-actions {
+  display: flex;
+}
+
+.mo-lib-player {
+  flex-basis: 100%;
+}
+
+.mo-lib-player audio {
+  width: 100%;
+}
+
+.mo-lib-empty {
+  color: var(--text-muted);
+  margin: var(--size-4-4) 0;
+}
+
+.mo-lib-trash {
+  margin-top: var(--size-4-6);
+}
+
+.mo-lib-trash summary {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mo-lib-rename-input {
+  width: 100%;
+}

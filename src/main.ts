@@ -12,6 +12,9 @@ import { TranscriptIndex } from './transcriptIndex';
 import { LinkMediaModal } from './linkMediaModal';
 import { Modules, ModuleState } from './modules';
 import { applyServer, normalizeServer, type Source } from './utils/server';
+import { LibraryClient } from './library/client';
+import { Uploader } from './library/uploader';
+import { LibraryView, VIEW_TYPE_LIBRARY } from './library/LibraryView';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -41,6 +44,8 @@ function viewRegistry(app: App): ViewRegistry {
 export default class MediaTranscriptPlugin extends Plugin {
   settings!: MediaTranscriptSettings;
   modules!: Modules;
+  library!: LibraryClient;
+  uploader!: Uploader;
   // The modules' part of data.json, kept beside the settings above.
   private moduleState: ModuleState = { modules: {}, enabledModules: {} };
   mediaLocator!: MediaLocator;
@@ -52,6 +57,26 @@ export default class MediaTranscriptPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
+    this.library = new LibraryClient(() => this.settings.serverUrl, () => this.app.vault.getName());
+    this.uploader = new Uploader(this);
+    this.uploader.start();
+    this.registerView(VIEW_TYPE_LIBRARY, leaf => new LibraryView(leaf, this));
+    this.addRibbonIcon('library', 'Media library', () => { void this.openLibrary(); });
+    this.addCommand({
+      id: 'open-media-library',
+      name: 'Open media library',
+      callback: () => { void this.openLibrary(); },
+    });
+    this.addCommand({
+      id: 'upload-current-media',
+      name: 'Upload current media file to the server',
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (!(file instanceof TFile) || !this.isMedia(file) || !this.library.configured) return false;
+        if (!checking) void this.uploadNow(file);
+        return true;
+      },
+    });
     this.transcripts = new TranscriptIndex(this);
     this.mediaLocator = new MediaLocator(this.app, () => this.settings, f => this.transcripts.sourceOf(f));
     this.app.workspace.onLayoutReady(() => {
@@ -92,6 +117,14 @@ export default class MediaTranscriptPlugin extends Plugin {
               .setTitle('Open in Media One')
               .setIcon('play-circle')
               .onClick(() => { void this.openInView(file); }),
+          );
+        }
+        if (file instanceof TFile && this.isMedia(file) && this.library.configured) {
+          menu.addItem(item =>
+            item
+              .setTitle('Upload to Media One server')
+              .setIcon('upload-cloud')
+              .onClick(() => { void this.uploadNow(file); }),
           );
         }
       }),
@@ -222,22 +255,32 @@ export default class MediaTranscriptPlugin extends Plugin {
     if (!this.isMedia(file)) return;
     const oldName = oldPath.slice(oldPath.lastIndexOf('/') + 1);
     if (oldName === file.name) return;
-    const oldBase = oldName.replace(/\.[^.]+$/, '');
     const oldDir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : '';
+    await this.renameTranscripts(oldName, file.name, oldDir);
+  }
 
+  /**
+   * Point the transcripts of media `oldName` at `newName`: a transcript that
+   * names its source is told the new name, and one named after the media is
+   * renamed to match (in its own folder; Obsidian updates links to it).
+   * `dir` is where the media was, for transcripts found by name beside it.
+   */
+  async renameTranscripts(oldName: string, newName: string, dir: string) {
+    const oldBase = oldName.replace(/\.[^.]+$/, '');
+    const newBase = newName.replace(/\.[^.]+$/, '');
     await this.transcripts.whenReady();
     const tracks = new Set<TFile>(this.transcripts.transcriptsFor(oldName));
-    const dir = this.settings.subtitleDirectory.trim() || oldDir;
-    for (const t of findSubtitleTracks(oldBase, dir, this.app.vault)) tracks.add(t.file);
+    const searchDir = this.settings.subtitleDirectory.trim() || dir;
+    for (const t of findSubtitleTracks(oldBase, searchDir, this.app.vault)) tracks.add(t.file);
 
     let renamed = 0;
     const blocked: string[] = [];
     for (const t of tracks) {
       if ((await this.transcripts.sourceOf(t))?.toLowerCase() === oldName.toLowerCase()) {
-        await this.transcripts.setSource(t, file.name);
+        await this.transcripts.setSource(t, newName);
       }
       if (!t.name.startsWith(oldBase + '.')) continue; // named its own way: leave the name
-      const target = normalizePath(`${t.parent?.path ?? ''}/${file.basename}${t.name.slice(oldBase.length)}`);
+      const target = normalizePath(`${t.parent?.path ?? ''}/${newBase}${t.name.slice(oldBase.length)}`);
       if (this.app.vault.getAbstractFileByPath(target)) {
         blocked.push(t.name);
         continue;
@@ -245,7 +288,7 @@ export default class MediaTranscriptPlugin extends Plugin {
       await this.app.fileManager.renameFile(t, target);
       renamed++;
     }
-    if (renamed > 0) new Notice(`Renamed ${renamed} transcript${renamed > 1 ? 's' : ''} to match ${file.name}`);
+    if (renamed > 0) new Notice(`Renamed ${renamed} transcript${renamed > 1 ? 's' : ''} to match ${newName}`);
     if (blocked.length > 0) {
       new Notice(`Kept ${blocked.join(', ')}: a file with the new name already exists.`);
     }
@@ -404,14 +447,14 @@ export default class MediaTranscriptPlugin extends Plugin {
     }
   }
 
-  private mediaExts(): string[] {
+  mediaExts(): string[] {
     return [
       ...this.settings.supportedVideoExtensions,
       ...this.settings.supportedAudioExtensions,
     ];
   }
 
-  private isMedia(file: TFile): boolean {
+  isMedia(file: TFile): boolean {
     const ext = file.extension.toLowerCase();
     return this.mediaExts().includes(ext);
   }
@@ -432,6 +475,22 @@ export default class MediaTranscriptPlugin extends Plugin {
       state: { file: file.path },
       active: true,
     });
+  }
+
+  async openLibrary() {
+    const ws = this.app.workspace;
+    let leaf = ws.getLeavesOfType(VIEW_TYPE_LIBRARY)[0];
+    if (!leaf) {
+      leaf = ws.getRightLeaf(false) ?? ws.getLeaf('split', 'vertical');
+      await leaf.setViewState({ type: VIEW_TYPE_LIBRARY, active: true });
+    }
+    await ws.revealLeaf(leaf);
+  }
+
+  async uploadNow(file: TFile) {
+    const outcome = await this.uploader.uploadOne(file.path);
+    if (outcome === 'retry') new Notice(`Could not upload ${file.name} now; the server cannot be reached.`);
+    else new Notice(`${file.name} is on the Media One server`);
   }
 
   /** Point Media One at a server (or at none, with ''), replacing the previous one everywhere. */
