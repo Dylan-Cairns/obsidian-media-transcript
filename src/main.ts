@@ -51,6 +51,7 @@ export default class MediaTranscriptPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+    this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
     this.transcripts = new TranscriptIndex(this);
     this.mediaLocator = new MediaLocator(this.app, () => this.settings, f => this.transcripts.sourceOf(f));
     this.app.workspace.onLayoutReady(() => {
@@ -161,7 +162,6 @@ export default class MediaTranscriptPlugin extends Plugin {
 
     this.addSettingTab(new MediaTranscriptSettingTab(this.app, this));
 
-    this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
     await this.modules.start();
   }
 
