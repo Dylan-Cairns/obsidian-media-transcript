@@ -104,6 +104,20 @@ export class Modules implements ModuleHost {
     return on;
   }
 
+  /**
+   * A module's settings for another part of the plugin to change, with how to
+   * keep the change: the running module's own copy, else what data.json holds.
+   */
+  settingsOf(key: string): { settings: Record<string, unknown> | null; save: () => Promise<void> } {
+    const running = this.loaded.get(key) as (ModulePlugin & { settings?: Record<string, unknown>; saveSettings?: () => Promise<void> }) | undefined;
+    if (running?.settings && running.saveSettings) {
+      return { settings: running.settings, save: () => running.saveSettings!() };
+    }
+    const stored = this.state.modules[key];
+    const settings = stored && typeof stored === 'object' ? stored as Record<string, unknown> : null;
+    return { settings, save: this.persist };
+  }
+
   /** Whether the module is switched on, as last decided by `isEnabled`. */
   chosen(key: string): boolean {
     return this.state.enabledModules[key] ?? false;

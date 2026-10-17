@@ -11,6 +11,7 @@ import { MediaLocator } from './mediaLocator';
 import { TranscriptIndex } from './transcriptIndex';
 import { LinkMediaModal } from './linkMediaModal';
 import { Modules, ModuleState } from './modules';
+import { applyServer, normalizeServer, type Source } from './utils/server';
 
 // Subtitle extensions we globally register for click-to-open. Clicking any of
 // these opens the transcript view, which reverse-resolves the matching media
@@ -431,6 +432,27 @@ export default class MediaTranscriptPlugin extends Plugin {
       state: { file: file.path },
       active: true,
     });
+  }
+
+  /** Point Media One at a server (or at none, with ''), replacing the previous one everywhere. */
+  async setServer(url: string) {
+    const next = normalizeServer(url);
+    const previous = this.settings.serverUrl;
+    const archive = this.modules.settingsOf('archive');
+    const result = applyServer({
+      mediaUrls: this.settings.mediaUrls,
+      sources: (archive.settings?.sources as Source[] | undefined) ?? null,
+      pendingUploads: (archive.settings?.pendingUploads as Record<string, string[]> | undefined) ?? null,
+    }, previous, next);
+    this.settings.mediaUrls = result.mediaUrls;
+    this.settings.serverUrl = next;
+    if (archive.settings && result.sources) {
+      archive.settings.sources = result.sources;
+      archive.settings.pendingUploads = result.pendingUploads ?? {};
+      await archive.save();
+    }
+    await this.saveSettings();
+    this.mediaLocator.invalidate();
   }
 
   async loadSettings() {

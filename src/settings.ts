@@ -15,6 +15,10 @@ export interface SubtitlePriority {
 }
 
 export interface MediaTranscriptSettings {
+  // ── Media One server ─────────────────────────────────────────────────────
+  // Its address; the modules' own lists hold what it stands for.
+  serverUrl: string;
+
   // ── Subtitle matching ────────────────────────────────────────────────────
   subtitleDirectory: string;
   priorities: SubtitlePriority[];
@@ -45,6 +49,7 @@ export interface MediaTranscriptSettings {
 }
 
 export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
+  serverUrl: '',
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],
@@ -74,6 +79,7 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     // Obsidian shows the plugin name as the heading automatically.
+    this.displayServer(containerEl);
     this.displayModuleSwitches(containerEl);
 
     new Setting(containerEl).setName('Subtitles').setHeading();
@@ -239,6 +245,30 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
       tab.containerEl = containerEl.createDiv('mt-module-settings');
       tab.display();
     }
+  }
+
+  /** The one address the modules share. */
+  private displayServer(containerEl: HTMLElement): void {
+    let value = this.plugin.settings.serverUrl;
+    new Setting(containerEl)
+      .setName('Media One server')
+      .setDesc(
+        'Where your media lives, reached over Tailscale or your network. Recordings are read from ' +
+          '<server>/library and the web image archive is shared through <server>/archive; ' +
+          'both are added to the lists below, first. Leave empty to use only those lists.',
+      )
+      .addText(t =>
+        t.setPlaceholder('https://media.example.ts.net')
+          .setValue(value)
+          .onChange(v => { value = v; }),
+      )
+      .addButton(b =>
+        b.setButtonText('Save').onClick(async () => {
+          await this.plugin.setServer(value);
+          new Notice(this.plugin.settings.serverUrl ? `Media One server: ${this.plugin.settings.serverUrl}` : 'Media One server removed.');
+          this.display();
+        }),
+      );
   }
 
   /** Which of the features that used to be separate plugins are on. */

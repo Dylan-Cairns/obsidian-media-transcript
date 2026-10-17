@@ -18,6 +18,15 @@ Media. They are now modules of this one, and each can be switched off in
 Switching a module on or off takes effect when Media One reloads; the settings tab offers a
 button for it.
 
+## Media One server
+
+If your media lives on a server of your own (for example an old computer reached over
+Tailscale), enter its address under **Settings → Media One → Media One server**. Media One then
+reads recordings from `<server>/library` and shares the web image archive through
+`<server>/archive`, ahead of anything else in those modules' lists; changing or clearing the
+address replaces those entries. Any server that serves files over HTTP works for `/library`;
+`/archive` must accept `PUT` of new files (WebDAV works).
+
 ## Coming from the separate plugins
 
 1. Update Media Transcript to 2.0 (it keeps its id, `media-transcript`, so it updates in place).
