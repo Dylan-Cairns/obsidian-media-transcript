@@ -84,7 +84,7 @@ describe('icloudPlaceholderName', () => {
 
 describe('remote media', () => {
   it('recognises URL prefixes', () => {
-    expect(isRemoteUrl('https://old-mac.taildfed27.ts.net/recordings')).toBe(true);
+    expect(isRemoteUrl('https://old-mac.example.ts.net/recordings')).toBe(true);
     expect(isRemoteUrl('http://nas.local:8080')).toBe(true);
     expect(isRemoteUrl('/Volumes/2T')).toBe(false);
     expect(isRemoteUrl('附件/media')).toBe(false);
