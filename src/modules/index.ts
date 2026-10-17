@@ -109,9 +109,11 @@ export class Modules implements ModuleHost {
    * keep the change: the running module's own copy, else what data.json holds.
    */
   settingsOf(key: string): { settings: Record<string, unknown> | null; save: () => Promise<void> } {
-    const running = this.loaded.get(key) as (ModulePlugin & { settings?: Record<string, unknown>; saveSettings?: () => Promise<void> }) | undefined;
-    if (running?.settings && running.saveSettings) {
-      return { settings: running.settings, save: () => running.saveSettings!() };
+    const running: (ModulePlugin & { settings?: Record<string, unknown>; saveSettings?: () => Promise<void> }) | undefined =
+      this.loaded.get(key);
+    const save = running?.saveSettings?.bind(running);
+    if (running?.settings && save) {
+      return { settings: running.settings, save };
     }
     const stored = this.state.modules[key];
     const settings = stored && typeof stored === 'object' ? stored as Record<string, unknown> : null;
