@@ -7,10 +7,14 @@ import { archiveName, resolve } from "./resolver";
 import { extractUrls } from "./scanner";
 import { storeFor } from "./store";
 import { formatSize } from "../../utils/format";
+import { streamSource, uploadInPieces } from "../../library/pieceUpload";
 import { t } from "../../i18n";
 
-// A phone reads the whole file into memory to keep it: keep that to what it can hold.
+// Kept whole in memory on its way, a video is limited to what a phone can hold.
+// Larger, and with a Media One server, it goes from the web to the server as a
+// stream, a piece at a time, whatever its size.
 const PHONE_MAX_BYTES = 500 * 1024 * 1024;
+const STREAM_FROM = 64 * 1024 * 1024;
 const VIDEO_TIMEOUT_MS = 30 * 60_000;
 const RECHECK_MS = 60_000;
 
@@ -235,16 +239,23 @@ export class VideoEmbeds {
 	async downloadOne(url: string, sourcePath: string, quiet = false): Promise<boolean> {
 		const { plugin } = this;
 		if (this.states.get(url) === "downloading") return false;
-		if (Platform.isMobile) {
-			const size = await contentLength(url);
-			if (size !== null && size > PHONE_MAX_BYTES) {
-				new Notice(t("archive.videoTooBigPhone", { size: formatSize(size) }), 10000);
-				return false;
-			}
+		const size = await contentLength(url);
+		const stream = size !== null && size > STREAM_FROM && this.core.library.configured;
+		if (!stream && Platform.isMobile && size !== null && size > PHONE_MAX_BYTES) {
+			new Notice(t("archive.videoTooBigPhone", { size: formatSize(size) }), 10000);
+			return false;
 		}
 		this.setState(url, "downloading");
 		const progress = quiet ? null : new Notice(t("archive.videoDownloading"), 0);
 		try {
+			if (stream && size !== null) {
+				await this.streamToArchive(url, size, sent => {
+					progress?.setMessage(t("archive.videoDownloadingPercent", { percent: Math.floor((sent / size) * 100) }));
+				});
+				this.setState(url, "archived");
+				if (!quiet) new Notice(t("archive.noticeVideoArchived"));
+				return true;
+			}
 			const dest = resolve(url, sourcePath, plugin.settings);
 			const r = await download(url, dest, plugin.app.vault, plugin.settings, plugin.servers, {
 				onDemand: true,
@@ -261,6 +272,22 @@ export class VideoEmbeds {
 		} finally {
 			progress?.hide();
 		}
+	}
+
+	/**
+	 * A large video, from the web to the Media One server's archive as it
+	 * downloads: read as a stream, sent a piece at a time, carried on after a
+	 * break. Never held whole, so a phone archives a video of gigabytes too.
+	 */
+	private async streamToArchive(url: string, size: number, onProgress: (sent: number) => void): Promise<void> {
+		const library = this.core.library;
+		const source = streamSource(async (offset) => {
+			const r = await fetch(url, { referrerPolicy: "no-referrer", headers: offset ? { Range: `bytes=${offset}-` } : {} });
+			if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+			if (offset > 0 && r.status !== 206) throw new Error("the site won't send part of the video");
+			return r.body;
+		});
+		await uploadInPieces(library, () => library.uploadBeginArchive(archiveName(url), url, size), size, source, onProgress);
 	}
 
 	async downloadAll(file: TFile): Promise<void> {

@@ -1,60 +1,151 @@
 import type { LibraryClient } from './client';
 
-/** Pieces of 8 MB: little to hold in memory, few enough requests. */
+/** Pieces of 8 MB, unless the server says otherwise: little to hold, few requests. */
 export const PIECE = 8 * 1024 * 1024;
+/** Pieces on their way at once: enough to keep the line busy while the server writes. */
+const PARALLEL = 3;
+const TRIES = 3;
+/**
+ * A piece not answered by then is taken for lost and sent again: a request on
+ * a network that stalled (a VPN coming back) may never answer, and would hold
+ * up every upload behind it. The server takes a piece sent twice in its stride.
+ */
+const PIECE_TIMEOUT_MS = 3 * 60_000;
+
+/** Where the pieces are read from. */
+export interface PieceSource {
+  read(offset: number, length: number): Promise<ArrayBuffer>;
+  close(): Promise<void>;
+}
 
 /**
- * Upload a file a piece at a time, reading it as a stream: what a phone can
- * do with a recording of gigabytes, holding one piece in memory. The server
- * keeps what arrived, so after a break (the app sent to the background, the
- * network gone) the next try carries on from there.
+ * Upload a file a piece at a time, never holding more than a few pieces: how
+ * media of any size is sent, from a phone as from a computer, into the
+ * library or (a video saved from the web) into the archive — `begin` says which. Each piece is
+ * checked by its sha256; several go at once; the server keeps what arrived,
+ * so after a break (the app closed or sent to the background, the network
+ * gone) the next try sends only what is missing.
  *
- * `read(offset)` opens the file from `offset` as a stream. Returns true if the
- * file was stored now, false if the server had it already.
+ * Returns true if the file was stored now, false if the server had it already.
+ * Stopped by `signal`, it sends no more pieces and rejects.
  */
+/** What beginning an upload answers: where to send pieces and which are there, or that the file is there. */
+export type Begun = { id: string; piece: number; have: number[] } | { entry: unknown };
+
 export async function uploadInPieces(
   client: LibraryClient,
-  vaultPath: string,
+  begin: () => Promise<Begun>,
   size: number,
-  read: (offset: number) => Promise<ReadableStream<Uint8Array>>,
+  source: PieceSource,
   onProgress?: (sent: number) => void,
+  signal?: AbortSignal,
 ): Promise<boolean> {
-  const begun = await client.uploadBegin(vaultPath, size);
-  if ('entry' in begun) return false;
-  const { id } = begun;
-  let offset = begun.received;
-  onProgress?.(offset);
-  while (offset < size) {
-    // Read from where the server is; a piece it says is out of step reopens the file there.
-    const reader = (await read(offset)).getReader();
-    let rest: Uint8Array = new Uint8Array(0);  // read past the piece being filled: the start of the next
-    try {
-      let inStep = true;
-      while (offset < size && inStep) {
-        const piece = new Uint8Array(Math.min(PIECE, size - offset));
-        let filled = 0;
-        while (filled < piece.length) {
-          if (rest.length === 0) {
-            const { done, value } = await reader.read();
-            if (done) throw new Error(`the file ended at ${offset + filled} of ${size} bytes`);
-            rest = value;
-          }
-          const take = Math.min(rest.length, piece.length - filled);
-          piece.set(rest.subarray(0, take), filled);
-          filled += take;
-          rest = rest.subarray(take);
-        }
-        const sent = await client.uploadPiece(id, offset, piece.buffer, await sha256Hex(piece.buffer));
-        inStep = sent === offset + piece.length;
-        offset = sent;
-        onProgress?.(offset);
+  try {
+    const begun = await begin();
+    if ('entry' in begun) return false;
+    const piece = begun.piece || PIECE;
+    const have = new Set(begun.have ?? []);
+    const missing: number[] = [];
+    let sent = 0;
+    for (let offset = 0; offset < size; offset += piece) {
+      if (have.has(offset)) sent += Math.min(piece, size - offset);
+      else missing.push(offset);
+    }
+    onProgress?.(sent);
+
+    const inFlight = new Set<Promise<void>>();
+    const failed: { error?: Error } = {};
+    for (const offset of missing) {
+      if (failed.error) break;
+      // Stopped (the plugin unloaded): what arrived stays on the server for next time.
+      if (signal?.aborted) {
+        failed.error = new Error('stopped');
+        break;
       }
-    } finally {
-      await reader.cancel().catch(() => {});
+      const length = Math.min(piece, size - offset);
+      const data = await source.read(offset, length);
+      const task = sendPiece(client, begun.id, offset, data).then(
+        () => {
+          sent += length;
+          onProgress?.(sent);
+        },
+        (e: unknown) => { failed.error ??= e instanceof Error ? e : new Error('a piece could not be sent'); },
+      );
+      inFlight.add(task);
+      void task.finally(() => inFlight.delete(task));
+      if (inFlight.size >= PARALLEL) await Promise.race(inFlight);
+    }
+    await Promise.all(inFlight);
+    if (failed.error) throw failed.error;
+    await client.uploadFinish(begun.id);
+    return true;
+  } finally {
+    await source.close();
+  }
+}
+
+/** One piece, tried again on a passing failure. */
+async function sendPiece(client: LibraryClient, id: string, offset: number, data: ArrayBuffer): Promise<void> {
+  const digest = await sha256Hex(data);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await withTimeout(client.uploadPiece(id, offset, data, digest), PIECE_TIMEOUT_MS);
+      return;
+    } catch (e) {
+      const status = (e as { status?: number }).status ?? 0;
+      if (attempt >= TRIES || (status >= 400 && status < 500)) throw e;
+      await new Promise(r => window.setTimeout(r, 1000 * attempt));
     }
   }
-  await client.uploadFinish(id);
-  return true;
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer = 0;
+  const late = new Promise<never>((_, reject) => {
+    timer = window.setTimeout(() => reject(Object.assign(new Error('no answer in time'), { status: 0 })), ms);
+  });
+  return Promise.race([work, late]).finally(() => window.clearTimeout(timer));
+}
+
+/**
+ * A file read as a stream from where it is asked for (`open(offset)`): what a
+ * phone has, serving vault files over its local web server with ranges. Read
+ * in order, one stream does; a jump opens another.
+ */
+export function streamSource(open: (offset: number) => Promise<ReadableStream<Uint8Array>>): PieceSource {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let position = -1;
+  let rest: Uint8Array = new Uint8Array(0);
+  const drop = async () => {
+    await reader?.cancel().catch(() => {});
+    reader = null;
+    rest = new Uint8Array(0);
+  };
+  return {
+    async read(offset, length) {
+      if (!reader || position !== offset) {
+        await drop();
+        reader = (await open(offset)).getReader();
+        position = offset;
+      }
+      const out = new Uint8Array(length);
+      let filled = 0;
+      while (filled < length) {
+        if (rest.length === 0) {
+          const { done, value } = await reader.read();
+          if (done) throw new Error(`the file ended at ${position + filled}`);
+          rest = value;
+        }
+        const take = Math.min(rest.length, length - filled);
+        out.set(rest.subarray(0, take), filled);
+        filled += take;
+        rest = rest.subarray(take);
+      }
+      position += length;
+      return out.buffer;
+    },
+    close: drop,
+  };
 }
 
 async function sha256Hex(data: ArrayBuffer): Promise<string> {

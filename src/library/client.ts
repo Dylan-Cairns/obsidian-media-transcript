@@ -167,35 +167,29 @@ export class LibraryClient {
   }
 
   /** Store `data` at `vaultPath`. True if stored now, false if the server already had this file. */
-  /** Begin (or take up again) an upload in pieces: its id and how much arrived, or the file if it is there. */
-  async uploadBegin(vaultPath: string, size: number): Promise<{ id: string; received: number } | { entry: unknown }> {
+  /**
+   * Begin (or take up again) an upload in pieces: its id, the piece size and
+   * the pieces already there (by offset), or the file if the server has it.
+   */
+  async uploadBegin(vaultPath: string, size: number): Promise<{ id: string; piece: number; have: number[] } | { entry: unknown }> {
     const r = await this.call('POST', 'upload/begin', JSON.stringify({ vault: this.vault(), path: vaultPath, size }), 'application/json');
-    return r.json as { id: string; received: number } | { entry: unknown };
+    return r.json as { id: string; piece: number; have: number[] } | { entry: unknown };
   }
 
-  /** Send one piece; returns how much the server has now. Out of step, it says where it is. */
-  async uploadPiece(id: string, offset: number, data: ArrayBuffer, sha256: string): Promise<number> {
+  /** Begin an upload in pieces into the web archive (`name`: <bucket>/<sha1>.<ext>), saved from `source`. */
+  async uploadBeginArchive(name: string, source: string, size: number): Promise<{ id: string; piece: number; have: number[] } | { entry: unknown }> {
+    const r = await this.call('POST', 'upload/begin', JSON.stringify({ archive: name, source, size }), 'application/json');
+    return r.json as { id: string; piece: number; have: number[] } | { entry: unknown };
+  }
+
+  /** Send one piece (any order, several at once). */
+  async uploadPiece(id: string, offset: number, data: ArrayBuffer, sha256: string): Promise<void> {
     const q = new URLSearchParams({ offset: String(offset), sha256 });
-    try {
-      const r = await this.call('PUT', `upload/${id}?${q.toString()}`, data, 'application/octet-stream');
-      return (r.json as { received: number }).received;
-    } catch (e) {
-      if ((e as LibraryError).status !== 409) throw e;
-      const r = await this.call('GET', `upload/${id}`);
-      return (r.json as { received: number }).received;
-    }
+    await this.call('PUT', `upload/${id}?${q.toString()}`, data, 'application/octet-stream');
   }
 
   async uploadFinish(id: string): Promise<void> {
     await this.call('POST', `upload/${id}/finish`);
-  }
-
-  /** Upload a file from disk, streamed (desktop): for media too large to hold in memory. True if stored now. */
-  async uploadFromDisk(vaultPath: string, fullPath: string, size: number, onProgress?: (sent: number) => void): Promise<boolean> {
-    if (!this.configured) throw new LibraryError(0, t('library.noServer'));
-    const { putFile, sha256OfFile } = await import('./streamUpload');
-    const q = new URLSearchParams({ vault: this.vault(), path: vaultPath, sha256: await sha256OfFile(fullPath) });
-    return (await putFile(`${this.server()}/api/upload?${q.toString()}`, fullPath, size, onProgress)) === 201;
   }
 
   async upload(vaultPath: string, data: ArrayBuffer, sha256: string): Promise<boolean> {

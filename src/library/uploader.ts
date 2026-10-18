@@ -2,15 +2,16 @@ import { FileSystemAdapter, Notice, Platform, TAbstractFile, TFile } from 'obsid
 import type MediaTranscriptPlugin from '../main';
 import { sha256Hex } from './client';
 import { DeviceState } from './deviceState';
-import { uploadInPieces } from './pieceUpload';
+import { streamSource, uploadInPieces, type PieceSource } from './pieceUpload';
+import { fileSource } from './streamUpload';
 import { t } from '../i18n';
 
 // A recording still being written grows; wait until it stops.
 const SETTLE_MS = 3000;
 const RETRY_MS = 10 * 60_000;
-// Up to this, a file is read whole and sent in one request. Larger, the
-// desktop streams it from disk in one request, and a phone (which can't)
-// sends it a piece at a time, carrying on after a break.
+// Up to this, a file is read whole and sent in one request. Larger, it is
+// sent a piece at a time, read from disk (desktop) or as a stream (phone),
+// and carried on after a break.
 const STREAM_FROM = 64 * 1024 * 1024;
 
 /**
@@ -28,6 +29,8 @@ const STREAM_FROM = 64 * 1024 * 1024;
  */
 export class Uploader {
   private running = false;
+  /** Stops a piece-by-piece upload when the plugin unloads, so none goes on behind it. */
+  private readonly stopping = new AbortController();
   private readonly device: DeviceState;
   /** Vault paths this device still has to upload. */
   readonly pending: string[];
@@ -51,6 +54,7 @@ export class Uploader {
 
   start(): void {
     const { plugin } = this;
+    plugin.register(() => this.stopping.abort());
     // Registered once the vault is loaded, so the existing files don't all count as new.
     plugin.app.workspace.onLayoutReady(() => {
       plugin.registerEvent(plugin.app.vault.on('create', f => this.added(f)));
@@ -130,7 +134,7 @@ export class Uploader {
 
   /** Upload what is waiting, oldest first; stops at the first failure to reach the server. */
   async flush(): Promise<void> {
-    if (this.running || !this.enabled() || this.pending.length === 0) return;
+    if (this.running || !this.enabled() || this.pending.length === 0 || this.stopping.signal.aborted) return;
     this.running = true;
     try {
       for (const path of [...this.pending]) {
@@ -151,7 +155,6 @@ export class Uploader {
     if (!(await this.settled(file))) return 'retry';
     const adapter = vault.adapter;
     const large = file.stat.size > STREAM_FROM;
-    const stream = large && Platform.isDesktopApp && adapter instanceof FileSystemAdapter;
     try {
       let stored: boolean;
       if (large) {
@@ -162,22 +165,25 @@ export class Uploader {
           const percent = Math.floor((sent / size) * 100);
           if (percent === shown) return;
           shown = percent;
-          // All sent: the server reads it back to check it before keeping it.
+          // All sent: the server puts the pieces together and checks the file.
           progress.setMessage(percent >= 100 ? t('library.uploadChecking', { name: file.name }) : t('library.uploading', { name: file.name, percent }));
         };
         try {
-          if (stream && adapter instanceof FileSystemAdapter) {
-            stored = await this.plugin.library.uploadFromDisk(file.path, adapter.getFullPath(file.path), size, onProgress);
+          let source: PieceSource;
+          if (Platform.isDesktopApp && adapter instanceof FileSystemAdapter) {
+            source = await fileSource(adapter.getFullPath(file.path));
           } else {
-            // The app serves vault files with ranges: read from where the server is, as a stream.
+            // The app serves vault files with ranges: read from where a piece starts, as a stream.
             const url = vault.getResourcePath(file);
-            stored = await uploadInPieces(this.plugin.library, file.path, size, async offset => {
+            source = streamSource(async offset => {
               const r = await fetch(url, { headers: { Range: `bytes=${offset}-` } });
               if (!r.ok || !r.body) throw new Error(`can't read ${file.path} (${r.status})`);
               if (offset > 0 && r.status !== 206) throw new Error(`can't read ${file.path} from the middle`);
               return r.body;
-            }, onProgress);
+            });
           }
+          const library = this.plugin.library;
+          stored = await uploadInPieces(library, () => library.uploadBegin(file.path, size), size, source, onProgress, this.stopping.signal);
         } finally {
           progress.hide();
         }

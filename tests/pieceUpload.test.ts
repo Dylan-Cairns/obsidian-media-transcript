@@ -1,40 +1,56 @@
-import { describe, expect, it } from 'vitest';
-import { PIECE, uploadInPieces } from '../src/library/pieceUpload';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { PIECE, streamSource, uploadInPieces, type PieceSource } from '../src/library/pieceUpload';
 import type { LibraryClient } from '../src/library/client';
 
-/** A server keeping pieces in order, as Media One does. */
-function fakeServer(opts: { received?: number; there?: boolean; slipAt?: number } = {}) {
-  const store: Uint8Array[] = [];
-  let received = opts.received ?? 0;
+beforeAll(() => {
+  // sendPiece waits between tries with window.setTimeout; keep the tests quick.
+  (globalThis as { window?: unknown }).window = { setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, (ms ?? 0) > 60_000 ? 30 : 1), clearTimeout };
+});
+
+/** A server keeping pieces by offset, in any order, as Media One does. */
+function fakeServer(opts: { have?: number[]; there?: boolean; failures?: Map<number, number[]> } = {}) {
+  const pieces = new Map<number, Uint8Array>();
   let finished = false;
-  let slipped = false;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const sentOffsets: number[] = [];
   const client = {
-    uploadBegin: async () => (opts.there ? { entry: {} } : { id: 'u1', received }),
+    uploadBegin: async () => (opts.there ? { entry: {} } : { id: 'u1', piece: PIECE, have: opts.have ?? [] }),
     uploadPiece: async (_id: string, offset: number, data: ArrayBuffer) => {
-      if (offset !== received) return received;
-      // Once: the piece is taken, but the answer says the server is a piece behind.
-      if (opts.slipAt !== undefined && offset === opts.slipAt && !slipped) {
-        slipped = true;
-        return received;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      sentOffsets.push(offset);
+      // Uneven answers: later pieces may land first.
+      await new Promise(r => setTimeout(r, (offset / PIECE) % 2 ? 1 : 5));
+      inFlight--;
+      const fail = opts.failures?.get(offset);
+      if (fail?.length) {
+        const status = fail.shift()!;
+        throw Object.assign(new Error(`HTTP ${status}`), { status });
       }
-      store.push(new Uint8Array(data));
-      received += data.byteLength;
-      return received;
+      pieces.set(offset, new Uint8Array(data));
     },
     uploadFinish: async () => { finished = true; },
   } as unknown as LibraryClient;
   const joined = () => {
-    const out = new Uint8Array(store.reduce((n, c) => n + c.length, 0));
+    const offsets = [...pieces.keys()].sort((a, b) => a - b);
+    const out = new Uint8Array(offsets.reduce((n, o) => n + pieces.get(o)!.length, 0));
     let at = 0;
-    for (const c of store) { out.set(c, at); at += c.length; }
+    for (const o of offsets) {
+      out.set(pieces.get(o)!, at);
+      at += pieces.get(o)!.length;
+    }
     return out;
   };
-  return { client, store, joined, get finished() { return finished; } };
+  return { client, pieces, sentOffsets, joined, get finished() { return finished; }, get maxInFlight() { return maxInFlight; } };
 }
 
+const file = new Uint8Array(PIECE * 5 + 12345).map((_, i) => (i * 7) % 251);
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
+
 /** The file as a stream from `offset`, in uneven chunks the way a reader hands them out. */
-function opener(file: Uint8Array, opened: number[]) {
-  return async (offset: number) => {
+function streamed(opened: number[]) {
+  return streamSource(async offset => {
     opened.push(offset);
     let at = offset;
     const sizes = [1000, 3 * 1024 * 1024 + 7, 5 * 1024 * 1024];
@@ -47,44 +63,119 @@ function opener(file: Uint8Array, opened: number[]) {
         at += n;
       },
     });
-  };
+  });
 }
 
-const file = new Uint8Array(PIECE * 2 + 12345).map((_, i) => (i * 7) % 251);
+/** A source that notes whether it was closed. */
+function watched(source: PieceSource) {
+  let closed = false;
+  return { source: { read: source.read, close: async () => { closed = true; await source.close(); } }, get closed() { return closed; } };
+}
 
 describe('uploadInPieces', () => {
-  it('sends the whole file in pieces, in order', async () => {
+  it('sends the whole file, several pieces at once, never more than three', async () => {
     const server = fakeServer();
     const opened: number[] = [];
     const progress: number[] = [];
-    expect(await uploadInPieces(server.client, 'a.mp4', file.length, opener(file, opened), p => progress.push(p))).toBe(true);
-    expect(Buffer.compare(Buffer.from(server.joined()), Buffer.from(file))).toBe(0);
+    const w = watched(streamed(opened));
+    expect(await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, w.source, p => progress.push(p))).toBe(true);
+    expect(same(server.joined(), file)).toBe(true);
     expect(server.finished).toBe(true);
-    expect(opened).toEqual([0]);
+    expect(opened).toEqual([0]);                 // read in one pass
+    expect(server.maxInFlight).toBeGreaterThan(1);
+    expect(server.maxInFlight).toBeLessThanOrEqual(3);
     expect(progress.at(-1)).toBe(file.length);
+    expect(w.closed).toBe(true);
   });
 
-  it('carries on from what the server already has', async () => {
-    const server = fakeServer({ received: PIECE });
-    server.store.push(file.slice(0, PIECE));
+  it('after a break, sends only the pieces missing, reading from where they are', async () => {
+    const server = fakeServer({ have: [0, PIECE, 3 * PIECE] });
+    for (const o of [0, PIECE, 3 * PIECE]) server.pieces.set(o, file.slice(o, o + PIECE));
     const opened: number[] = [];
-    await uploadInPieces(server.client, 'a.mp4', file.length, opener(file, opened));
-    expect(opened).toEqual([PIECE]);
-    expect(Buffer.compare(Buffer.from(server.joined()), Buffer.from(file))).toBe(0);
+    const progress: number[] = [];
+    await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed(opened), p => progress.push(p));
+    expect(server.sentOffsets.sort((a, b) => a - b)).toEqual([2 * PIECE, 4 * PIECE, 5 * PIECE]);
+    expect(opened).toEqual([2 * PIECE, 4 * PIECE]);   // a jump over a piece that is there opens the file again
+    expect(progress[0]).toBe(3 * PIECE);             // starts from what arrived
+    expect(same(server.joined(), file)).toBe(true);
   });
 
-  it('reopens the file where the server says it is', async () => {
-    const server = fakeServer({ slipAt: PIECE });
-    const opened: number[] = [];
-    await uploadInPieces(server.client, 'a.mp4', file.length, opener(file, opened));
-    expect(opened).toEqual([0, PIECE]);
-    expect(Buffer.compare(Buffer.from(server.joined()), Buffer.from(file))).toBe(0);
+  it('tries a piece again after a passing failure', async () => {
+    const server = fakeServer({ failures: new Map([[2 * PIECE, [502, 503]]]) });
+    await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]));
+    expect(server.sentOffsets.filter(o => o === 2 * PIECE)).toHaveLength(3);
+    expect(same(server.joined(), file)).toBe(true);
+  });
+
+  it('gives up on a piece the server refuses, without finishing, and closes the file', async () => {
+    const server = fakeServer({ failures: new Map([[PIECE, [400]]]) });
+    const w = watched(streamed([]));
+    await expect(uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, w.source)).rejects.toThrow('HTTP 400');
+    expect(server.sentOffsets.filter(o => o === PIECE)).toHaveLength(1);  // not tried again
+    expect(server.finished).toBe(false);
+    expect(w.closed).toBe(true);
+  });
+
+  it('gives up after three failures in a row', async () => {
+    const server = fakeServer({ failures: new Map([[0, [500, 500, 500]]]) });
+    await expect(uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]))).rejects.toThrow('HTTP 500');
+    expect(server.finished).toBe(false);
+  });
+
+  it('stops sending when told to, and closes the file', async () => {
+    const server = fakeServer();
+    const stop = new AbortController();
+    const w = watched(streamed([]));
+    let progressCalls = 0;
+    const run = uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, w.source, () => {
+      if (++progressCalls === 2) stop.abort();
+    }, stop.signal);
+    await expect(run).rejects.toThrow('stopped');
+    expect(server.sentOffsets.length).toBeLessThan(6);
+    expect(server.finished).toBe(false);
+    expect(w.closed).toBe(true);
+  });
+
+  it('sends a piece again when its request never answers', async () => {
+    const server = fakeServer();
+    const real = server.client.uploadPiece.bind(server.client);
+    let hung = false;
+    (server.client as unknown as { uploadPiece: typeof real }).uploadPiece = (id, offset, data, sha) => {
+      if (offset === PIECE && !hung) {
+        hung = true;
+        return new Promise(() => {});  // a stalled network: no answer, ever
+      }
+      return real(id, offset, data, sha);
+    };
+    await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]));
+    expect(hung).toBe(true);
+    expect(same(server.joined(), file)).toBe(true);
+    expect(server.finished).toBe(true);
   });
 
   it('does nothing when the server has the file', async () => {
     const server = fakeServer({ there: true });
     const opened: number[] = [];
-    expect(await uploadInPieces(server.client, 'a.mp4', file.length, opener(file, opened))).toBe(false);
+    const w = watched(streamed(opened));
+    expect(await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, w.source)).toBe(false);
     expect(opened).toEqual([]);
+    expect(w.closed).toBe(true);
+  });
+});
+
+describe('streamSource', () => {
+  it('reads pieces in order from one stream, and opens another on a jump', async () => {
+    const opened: number[] = [];
+    const s = streamed(opened);
+    expect(same(new Uint8Array(await s.read(0, 10)), file.subarray(0, 10))).toBe(true);
+    expect(same(new Uint8Array(await s.read(10, 5000)), file.subarray(10, 5010))).toBe(true);
+    expect(same(new Uint8Array(await s.read(PIECE, 100)), file.subarray(PIECE, PIECE + 100))).toBe(true);
+    expect(opened).toEqual([0, PIECE]);
+    await s.close();
+  });
+
+  it('says so when the file is shorter than asked', async () => {
+    const s = streamed([]);
+    await expect(s.read(file.length - 10, 100)).rejects.toThrow('ended');
   });
 });
