@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addUrl,
+  isArchiveName,
+  readUrl,
   nameKey,
   parseRemoteIndex,
   readSource,
@@ -126,5 +129,37 @@ describe('nameKey', () => {
     expect(nameKey(decomposed)).toBe(nameKey(composed));
     expect(parseRemoteIndex(JSON.stringify({ files: [{ path: 'a/' + decomposed }] }))?.byName.get(nameKey(composed)))
       .toBe('a/' + decomposed);
+  });
+});
+
+describe('archived videos', () => {
+  const name = '8b34050f3e919cea72b4bd64d86a71c4b2d135e2.mp4';
+  const url = 'https://video.twimg.com/amplify_video/1/vid/avc1/1080x720/O7.mp4';
+
+  it('adds the url right after the source, and reads it back', () => {
+    const text = `{\n  "source": "${name}",\n  "segments": [{"text": "hi", "url": "nested"}]\n}`;
+    const out = addUrl(text, url)!;
+    expect(out).toBe(`{\n  "source": "${name}", "url": "${url}",\n  "segments": [{"text": "hi", "url": "nested"}]\n}`);
+    expect(readUrl(out)).toBe(url);
+    expect(readSource(out)).toBe(name);
+    expect(addUrl(out, 'https://other/x.mp4')).toBe(out);
+  });
+
+  it('adds it first when there is no source, and leaves non-objects alone', () => {
+    expect(addUrl('{"segments": []}', url)).toBe(`{"url": "${url}", "segments": []}`);
+    expect(addUrl('{}', url)).toBe(`{"url": "${url}"}`);
+    expect(addUrl('[1]', url)).toBeNull();
+    expect(addUrl('nope', url)).toBeNull();
+  });
+
+  it('reads only a top-level web address', () => {
+    expect(readUrl('{"segments": [{"url": "https://x/y.mp4"}]}')).toBeNull();
+    expect(readUrl('{"url": "file:///x.mp4"}')).toBeNull();
+  });
+
+  it('knows an archive name', () => {
+    expect(isArchiveName(name)).toBe(true);
+    expect(isArchiveName('Recording 1.m4a')).toBe(false);
+    expect(isArchiveName('8b34.mp4')).toBe(false);
   });
 });

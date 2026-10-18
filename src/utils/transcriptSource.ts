@@ -70,6 +70,60 @@ export function writeSource(text: string, name: string): string | null {
   return readSource(out) === name.split(/[\\/]/).pop() ? out : null;
 }
 
+const URL_MEMBER = /"url"\s*:\s*("(?:[^"\\]|\\.)*")/;
+
+/** The web address a transcript names as where its media came from (an archived video's link), or null. */
+export function readUrl(text: string): string | null {
+  const head = text.slice(0, HEAD_BYTES);
+  const m = head.match(URL_MEMBER);
+  if (!m || !isTopLevel(head, m.index ?? 0)) return null;
+  try {
+    const value: unknown = JSON.parse(m[1]);
+    return typeof value === 'string' && /^https?:\/\//i.test(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `text` with a top-level `"url"` member saying where its media came from,
+ * put right after `"source"` (or first), the rest byte for byte. Unchanged if
+ * it has one already; null if `text` isn't a JSON object.
+ */
+export function addUrl(text: string, url: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (readUrl(text) !== null) return text;
+  const member = `"url": ${JSON.stringify(url)}`;
+  const head = text.slice(0, HEAD_BYTES);
+  const m = head.match(SOURCE_MEMBER);
+  let out: string;
+  if (m && isTopLevel(head, m.index ?? 0)) {
+    const end = (m.index ?? 0) + m[0].length;
+    out = `${text.slice(0, end)}, ${member}${text.slice(end)}`;
+  } else {
+    const brace = text.indexOf('{');
+    const empty = Object.keys(parsed).length === 0;
+    out = `${text.slice(0, brace + 1)}${member}${empty ? '' : ', '}${text.slice(brace + 1)}`;
+  }
+  try {
+    JSON.parse(out);
+  } catch {
+    return null;
+  }
+  return readUrl(out) === url ? out : null;
+}
+
+/** A file name in the web archive: the SHA-1 of its URL and an extension ("8b34…e2.mp4"). */
+export function isArchiveName(name: string): boolean {
+  return /^[0-9a-f]{40}\.[a-z0-9]{1,10}$/i.test(name);
+}
+
 // Depth 1 inside the outermost object, ignoring braces inside strings.
 function isTopLevel(text: string, at: number): boolean {
   let depth = 0;

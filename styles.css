@@ -1274,3 +1274,19 @@ img.at-flash {
 .mo-video-replaced {
   display: none !important;
 }
+
+/* Transcript view: the notes an archived video comes from */
+.mt-origin {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-2) var(--size-4-2);
+  margin-top: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.mt-origin-notes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+}

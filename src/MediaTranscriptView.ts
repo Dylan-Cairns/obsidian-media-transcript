@@ -80,7 +80,7 @@ export class MediaTranscriptView extends FileView {
 
   getViewType() { return VIEW_TYPE_MEDIA_TRANSCRIPT; }
   getDisplayText() {
-    return this.media?.basename ?? this.file?.basename ?? t('core.mediaOne');
+    return this.media?.title ?? this.media?.basename ?? this.file?.basename ?? t('core.mediaOne');
   }
 
   /** The media being played (for a subtitle file opened directly, its media). */
@@ -351,8 +351,33 @@ export class MediaTranscriptView extends FileView {
       attr: { src: resourcePath, controls: '' },
     });
     this.buildSpeedControl(wrapper);
+    this.buildOrigin(container, media);
     this.mediaEl.addEventListener('timeupdate', () => this.syncHighlight());
     this.reportLoadErrors(this.mediaEl, media);
+  }
+
+  /** An archived web video: the notes that show it, found by its address. */
+  private buildOrigin(container: HTMLElement, media: ResolvedMedia) {
+    const origin = media.origin;
+    if (!origin) return;
+    const row = container.createDiv('mt-origin');
+    row.createSpan({ cls: 'mt-origin-label', text: t('core.originNotes') });
+    const list = row.createSpan('mt-origin-notes');
+    void (async () => {
+      const notes: TFile[] = [];
+      for (const f of this.app.vault.getMarkdownFiles()) {
+        if ((await this.app.vault.cachedRead(f)).includes(origin)) notes.push(f);
+        if (!row.isConnected) return;
+      }
+      if (notes.length === 0) list.setText(t('core.originNone'));
+      for (const f of notes) {
+        const a = list.createEl('a', { cls: 'internal-link', text: f.basename, attr: { href: f.path } });
+        a.addEventListener('click', e => {
+          e.preventDefault();
+          void this.app.workspace.getLeaf(false).openFile(f);
+        });
+      }
+    })();
   }
 
   // Media outside the vault can vanish under us — a drive unplugged, a home
@@ -371,7 +396,7 @@ export class MediaTranscriptView extends FileView {
     const media = this.isVideo ? (video.audioTwin ?? video) : video;
     const resourcePath = media.src;
     container.createSpan('mt-audio-bar-icon').setText(this.isVideo ? '🎧' : '🎵');
-    container.createSpan('mt-audio-bar-title').setText(media.basename);
+    container.createSpan('mt-audio-bar-title').setText(video.title ?? media.basename);
     const audio = container.createEl('audio', {
       cls: 'mt-media-audio',
       attr: { src: resourcePath, controls: '' },

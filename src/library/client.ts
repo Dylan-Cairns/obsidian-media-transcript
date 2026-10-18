@@ -22,6 +22,8 @@ export interface Job {
   error?: string | null;
   note?: string;
   force?: boolean;       // asked for again: its transcripts replace the vault's
+  sourceUrl?: string;    // an archived video's: the link it was archived from
+  title?: string;        // an archived video's: the note it was asked from, to name its transcript
   created: number;       // seconds since the epoch, server time
   finished?: number | null;
   changed: number;
@@ -76,11 +78,27 @@ export class LibraryClient {
     return (r.json as { job: Job | null }).job;
   }
 
+  /** Transcribe a video in the web archive (`name`: <bucket>/<sha1>.<ext>); its transcripts come to this vault. */
+  async transcribeArchived(name: string, url: string, title: string, force = false): Promise<Job | null> {
+    const body = JSON.stringify({ vault: this.vault(), archive: name, url, title, force });
+    const r = await this.call('POST', 'transcribe', body, 'application/json');
+    return (r.json as { job: Job | null }).job;
+  }
+
   /** A text file of this vault from the server (a transcript). */
-  async text(vaultPath: string): Promise<string> {
+  text(vaultPath: string): Promise<string> {
+    return this.fetchText(this.url(vaultPath));
+  }
+
+  /** A transcript of an archived video, by its file name (<sha1>.<model>.json). */
+  archivedText(name: string): Promise<string> {
+    return this.fetchText(`${this.server()}/library/_archive-transcripts/${name.slice(0, 2)}/${encodeURIComponent(name)}`);
+  }
+
+  private async fetchText(url: string): Promise<string> {
     let r: RequestUrlResponse;
     try {
-      r = await requestUrl({ url: this.url(vaultPath), throw: false });
+      r = await requestUrl({ url, throw: false });
     } catch {
       throw new LibraryError(0, t('library.unreachable'));
     }

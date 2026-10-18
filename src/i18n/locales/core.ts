@@ -117,6 +117,10 @@ const en = {
   'core.serverSet': 'Media One server: {url}',
   'core.serverRemoved': 'Media One server removed.',
   'core.settingUploadNew': 'Upload new media to the server',
+  'core.originNotes': 'In notes:',
+  'core.originNone': 'no note shows it now',
+  'core.settingArchiveTranscripts': 'Transcripts of archived videos',
+  'core.settingArchiveTranscriptsDesc': 'Folder for the transcripts of web videos kept in the archive (they have no file in the vault to sit beside). Each is named after the note it was asked from.',
   'core.settingUploadNewDesc': 'Recordings and videos added to the vault are uploaded to the server right away (checked by sha256), ' +
     'so every device can play them. The file stays in the vault. Without a connection it waits and is ' +
     'retried every 10 minutes.',
@@ -241,6 +245,10 @@ const zh: Partial<Record<keyof typeof en, string>> = {
   'core.serverSet': 'Media One 服务器：{url}',
   'core.serverRemoved': '已移除 Media One 服务器。',
   'core.settingUploadNew': '上传新媒体到服务器',
+  'core.originNotes': '出自笔记：',
+  'core.originNone': '目前没有笔记引用它',
+  'core.settingArchiveTranscripts': '归档视频的转录稿',
+  'core.settingArchiveTranscriptsDesc': '存放归档网页视频转录稿的文件夹（这些视频不在库里，转录稿没有地方挨着放）。转录稿以发起转文字的笔记命名。',
   'core.settingUploadNewDesc': '添加到库中的录音和视频会立即上传到服务器（按 sha256 校验），' +
     '让每台设备都能播放。文件仍保留在库中。没有网络时会等待，' +
     '并每 10 分钟重试一次。',

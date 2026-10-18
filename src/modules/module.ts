@@ -23,11 +23,14 @@ export interface ModuleHost {
 export abstract class ModulePlugin extends Component {
   readonly app: App;
   readonly manifest: PluginManifest;
+  /** Media One itself, for what a module shares with it (the server, transcripts). */
+  readonly hostPlugin: Plugin;
   /** The module's settings, shown in a section of the host's settings tab. */
   settingTab: ModuleSettingTab | null = null;
 
   constructor(private readonly host: ModuleHost, readonly key: string) {
     super();
+    this.hostPlugin = host.plugin;
     this.app = host.plugin.app;
     this.manifest = host.plugin.manifest;
   }

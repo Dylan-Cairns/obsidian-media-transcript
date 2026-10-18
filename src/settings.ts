@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, normalizePath } from 'obsidian';
 import { MODULES } from './modules';
 import type MediaTranscriptPlugin from './main';
 import { parseFolderList } from './utils/mediaMatch';
@@ -22,6 +22,8 @@ export interface MediaTranscriptSettings {
   // Upload media added to the vault to the server at once. (What is waiting
   // to upload is this device's own, kept in DeviceState, not here.)
   uploadNewMedia: boolean;
+  // Where transcripts of archived web videos go (they have no media in the vault to sit beside).
+  archiveTranscriptFolder: string;
 
   // ── Subtitle matching ────────────────────────────────────────────────────
   subtitleDirectory: string;
@@ -55,6 +57,7 @@ export interface MediaTranscriptSettings {
 export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   serverUrl: '',
   uploadNewMedia: false,
+  archiveTranscriptFolder: 'Transcripts',
   subtitleDirectory: '',
   priorities: [{ marker: '', label: 'Default (no marker)' }],
   mediaFolders: [],
@@ -257,6 +260,16 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
           this.plugin.settings.uploadNewMedia = v;
           await this.plugin.saveSettings();
           if (v) void this.plugin.uploader.flush();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName(t('core.settingArchiveTranscripts'))
+      .setDesc(t('core.settingArchiveTranscriptsDesc'))
+      .addText(text =>
+        text.setPlaceholder('Transcripts').setValue(this.plugin.settings.archiveTranscriptFolder).onChange(async v => {
+          this.plugin.settings.archiveTranscriptFolder = normalizePath(v.trim() || 'Transcripts');
+          await this.plugin.saveSettings();
         }),
       );
   }

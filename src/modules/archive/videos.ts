@@ -1,8 +1,9 @@
 import { Menu, Notice, Platform, TFile, requestUrl, setIcon } from "obsidian";
 import type ArchiveRedirectPlugin from "./main";
+import type MediaTranscriptPlugin from "../../main";
 import { download } from "./downloader";
 import { isVideoUrl } from "./policies";
-import { resolve } from "./resolver";
+import { archiveName, resolve } from "./resolver";
 import { extractUrls } from "./scanner";
 import { storeFor } from "./store";
 import { formatSize } from "../../utils/format";
@@ -21,7 +22,9 @@ type State = "unknown" | "remote" | "downloading" | "archived";
  * archive's redirect then plays the archived copy once there is one.
  *
  * Videos are archived only when asked: on the device that asks, which uploads
- * the copy to the servers. The note is left as it is.
+ * the copy to the servers. The note is left as it is. An archived video can
+ * then be transcribed on the Media One server; the transcript comes to the
+ * vault's transcripts folder and the bar opens it.
  */
 export class VideoEmbeds {
 	private states = new Map<string, State>();
@@ -30,8 +33,18 @@ export class VideoEmbeds {
 
 	constructor(private plugin: ArchiveRedirectPlugin) {}
 
+	private get core(): MediaTranscriptPlugin {
+		return this.plugin.hostPlugin as MediaTranscriptPlugin;
+	}
+
 	start(): void {
 		const { plugin } = this;
+		// A transcript arriving, or a job moving on, shows on the bars.
+		plugin.registerEvent(plugin.app.vault.on("create", (f) => {
+			if (f.path.endsWith(".json")) window.setTimeout(() => this.repaintAll(), 1500);
+		}));
+		plugin.registerInterval(window.setInterval(() => this.repaintAll(), 30_000));
+		this.core.transcriptSync.onJobs(() => this.repaintAll());
 		plugin.addCommand({
 			id: "archive-download-videos",
 			name: t("archive.commandDownloadVideos"),
@@ -107,17 +120,58 @@ export class VideoEmbeds {
 			const label = bar.createSpan({ cls: "mo-video-status" });
 			setIcon(label.createSpan({ cls: "mo-video-icon" }), "check");
 			label.appendText(t("archive.videoArchived"));
+			this.paintTranscript(bar, url);
 			return;
 		}
-		const button = bar.createEl("button", { cls: "mo-video-button" });
-		setIcon(button.createSpan({ cls: "mo-video-icon" }), "download");
-		button.appendText(state === "downloading" ? t("archive.videoDownloading") : t("archive.videoDownload"));
-		button.disabled = state === "downloading";
-		button.addEventListener("click", (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			void this.downloadOne(url, bar.dataset.note ?? "");
-		});
+		button(bar, "download", state === "downloading" ? t("archive.videoDownloading") : t("archive.videoDownload"),
+			state === "downloading", () => void this.downloadOne(url, bar.dataset.note ?? ""));
+	}
+
+	/** After "Archived": open its transcript, or transcribe it (on the server, so only with one set). */
+	private paintTranscript(bar: HTMLElement, url: string): void {
+		const { core } = this;
+		const media = archiveName(url).slice(3);
+		const transcript = core.transcripts.transcriptsFor(media).find((f) => f.extension === "json");
+		if (transcript) {
+			button(bar, "file-text", t("archive.videoTranscript"), false, () => void core.openTranscript(transcript));
+			return;
+		}
+		if (!core.library.configured) return;
+		const job = core.transcriptSync.known.find((j) => j.path === `_archive/${archiveName(url)}`);
+		if (job && (job.state === "queued" || job.state === "claimed")) {
+			bar.createSpan({ cls: "mo-video-status", text: t("archive.videoTranscribing") });
+			return;
+		}
+		if (job?.state === "done" && job.outputs.length) {
+			// Done on the server; the transcript is on its way to the vault.
+			bar.createSpan({ cls: "mo-video-status", text: t("archive.videoTranscriptComing") });
+			return;
+		}
+		if (job?.state === "failed" && /没有音轨|no audio/i.test(job.error ?? "")) {
+			bar.createSpan({ cls: "mo-video-status", text: t("archive.videoNoAudio") });
+			return;
+		}
+		button(bar, "captions", t("archive.videoTranscribe"), false, () => void this.transcribe(url, bar.dataset.note ?? ""));
+		if (job?.state === "failed") bar.createSpan({ cls: "mo-video-status mod-warning", text: t("archive.videoTranscribeFailed"), attr: { title: job.error ?? "" } });
+	}
+
+	private repaintAll(): void {
+		for (const url of this.bars.keys()) this.setState(url, this.states.get(url) ?? "unknown");
+	}
+
+	async transcribe(url: string, sourcePath: string): Promise<void> {
+		const { core } = this;
+		const title = sourcePath.slice(sourcePath.lastIndexOf("/") + 1).replace(/\.md$/, "");
+		try {
+			const job = await core.library.transcribeArchived(archiveName(url), url, title);
+			if (job) core.transcriptSync.remember([job]);
+			new Notice(job ? t("archive.noticeTranscribeQueued") : t("archive.noticeTranscribeExists"));
+			// Already done before: fetch it now rather than at the next round.
+			if (!job || job.state === "done") void core.transcriptSync.sync();
+		} catch (e) {
+			new Notice(t("archive.noticeTranscribeFailed", { reason: e instanceof Error ? e.message : String(e) }));
+		}
+		this.repaintAll();
 	}
 
 	private setState(url: string, state: State): void {
@@ -188,6 +242,18 @@ export class VideoEmbeds {
 		progress.hide();
 		new Notice(t("archive.noticeVideosDone", { ok, total: urls.length }));
 	}
+}
+
+function button(bar: HTMLElement, icon: string, text: string, disabled: boolean, onClick: () => void): void {
+	const b = bar.createEl("button", { cls: "mo-video-button" });
+	setIcon(b.createSpan({ cls: "mo-video-icon" }), icon);
+	b.appendText(text);
+	b.disabled = disabled;
+	b.addEventListener("click", (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		onClick();
+	});
 }
 
 /** The size the server gives for `url`, or null if it doesn't say. */

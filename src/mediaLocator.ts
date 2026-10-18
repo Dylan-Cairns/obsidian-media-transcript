@@ -2,7 +2,7 @@ import { App, Platform, TFile, normalizePath, requestUrl } from 'obsidian';
 import type { MediaTranscriptSettings } from './settings';
 import { findMediaForSubtitle } from './utils/subtitleFinder';
 import { t } from './i18n';
-import { RemoteIndex, nameKey, parseRemoteIndex, remotePathUrl } from './utils/transcriptSource';
+import { RemoteIndex, isArchiveName, nameKey, parseRemoteIndex, readUrl, remotePathUrl } from './utils/transcriptSource';
 import {
   MediaEntry,
   audioTwin,
@@ -12,6 +12,7 @@ import {
   remoteCandidates,
   remoteFileUrl,
   subtitleBaseCandidates,
+  subtitleBaseName,
 } from './utils/mediaMatch';
 
 /** Media ready to hand to an <audio>/<video> element, wherever it lives. */
@@ -25,6 +26,10 @@ export interface ResolvedMedia {
   // listening), played instead when the picture is hidden — it is a fraction
   // of the size, so it starts sooner, above all from a server.
   audioTwin?: ResolvedMedia | null;
+  // An archived web video: shown by its transcript's name (the media's is a
+  // hash), with the address it came from, to find the notes that show it.
+  title?: string;
+  origin?: string;
 }
 
 export interface MediaLookup {
@@ -138,6 +143,10 @@ export class MediaLocator {
     // The name the transcript gives is trusted first; its own filename is
     // only a guess, and the only clue for transcripts that don't say.
     const source = await this.sourceOf(subtitle);
+    if (source && isArchiveName(source)) {
+      const archived = await this.archivedMedia(subtitle, source, searched);
+      if (archived) return { media: archived, searched };
+    }
     const candidates = subtitleBaseCandidates(subtitle.name);
     const isMedia = (ext: string) =>
       [...settings.supportedVideoExtensions, ...settings.supportedAudioExtensions].includes(ext.toLowerCase());
@@ -367,6 +376,30 @@ export class MediaLocator {
       pickMedia(candidates, found, settings.supportedVideoExtensions, settings.supportedAudioExtensions);
     const twin = url ? this.twinName(url, (_, sibling) => found.find(e => e.ref === sibling)?.ref ?? null) : null;
     return { url, twin, reachable };
+  }
+
+  /**
+   * A video kept in the web archive (its transcript's source is the archive
+   * name): the server's copy, or else the address it was archived from.
+   */
+  private async archivedMedia(subtitle: TFile, name: string, searched: string[]): Promise<ResolvedMedia | null> {
+    const original = readUrl(await this.app.vault.cachedRead(subtitle)) ?? undefined;
+    const named = (media: ResolvedMedia): ResolvedMedia =>
+      ({ ...media, title: subtitleBaseName(subtitle.name), origin: original });
+    const server = this.settings().serverUrl;
+    if (server) {
+      const url = `${server}/archive/${name.slice(0, 2)}/${name}`;
+      searched.push(`${server}/archive`);
+      const r = await Promise.race([
+        requestUrl({ url, method: 'HEAD', throw: false }).catch(() => null),
+        new Promise<null>(resolve => window.setTimeout(() => resolve(null), REMOTE_TIMEOUT_MS)),
+      ]);
+      if (r?.status === 200) return named(this.remoteMedia(url));
+    }
+    if (!original) return null;
+    searched.push(original);
+    // Played from the original address, but known by the archive name its transcripts give.
+    return named({ ...this.remoteMedia(original), basename: name.slice(0, name.lastIndexOf('.')), extension: name.slice(name.lastIndexOf('.') + 1) });
   }
 
   private remoteMedia(url: string): ResolvedMedia {
