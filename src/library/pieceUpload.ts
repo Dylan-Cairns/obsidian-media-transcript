@@ -41,46 +41,81 @@ export async function uploadInPieces(
   signal?: AbortSignal,
 ): Promise<boolean> {
   try {
-    const begun = await begin();
-    if ('entry' in begun) return false;
-    const piece = begun.piece || PIECE;
-    const have = new Set(begun.have ?? []);
-    const missing: number[] = [];
-    let sent = 0;
-    for (let offset = 0; offset < size; offset += piece) {
-      if (have.has(offset)) sent += Math.min(piece, size - offset);
-      else missing.push(offset);
-    }
-    onProgress?.(sent);
-
-    const inFlight = new Set<Promise<void>>();
-    const failed: { error?: Error } = {};
-    for (const offset of missing) {
-      if (failed.error) break;
-      // Stopped (the plugin unloaded): what arrived stays on the server for next time.
-      if (signal?.aborted) {
-        failed.error = new Error('stopped');
-        break;
+    // A round: ask what the server has, send what's missing, ask it to keep the file.
+    // Finishing may find a piece spoiled on its disk and ask for it again: another round.
+    for (let round = 1; ; round++) {
+      const begun = await begin();
+      if ('entry' in begun) return false;
+      await sendMissing(client, begun, size, source, onProgress, signal);
+      try {
+        await finish(client, begun.id);
+        return true;
+      } catch (e) {
+        if ((e as { status?: number }).status !== 409 || round >= ROUNDS) throw e;
       }
-      const length = Math.min(piece, size - offset);
-      const data = await source.read(offset, length);
-      const task = sendPiece(client, begun.id, offset, data).then(
-        () => {
-          sent += length;
-          onProgress?.(sent);
-        },
-        (e: unknown) => { failed.error ??= e instanceof Error ? e : new Error('a piece could not be sent'); },
-      );
-      inFlight.add(task);
-      void task.finally(() => inFlight.delete(task));
-      if (inFlight.size >= PARALLEL) await Promise.race(inFlight);
     }
-    await Promise.all(inFlight);
-    if (failed.error) throw failed.error;
-    await client.uploadFinish(begun.id);
-    return true;
   } finally {
     await source.close();
+  }
+}
+
+const ROUNDS = 3;
+
+async function sendMissing(
+  client: LibraryClient,
+  begun: { id: string; piece: number; have: number[] },
+  size: number,
+  source: PieceSource,
+  onProgress?: (sent: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const piece = begun.piece || PIECE;
+  const have = new Set(begun.have ?? []);
+  const missing: number[] = [];
+  let sent = 0;
+  for (let offset = 0; offset < size; offset += piece) {
+    if (have.has(offset)) sent += Math.min(piece, size - offset);
+    else missing.push(offset);
+  }
+  onProgress?.(sent);
+
+  const inFlight = new Set<Promise<void>>();
+  const failed: { error?: Error } = {};
+  for (const offset of missing) {
+    if (failed.error) break;
+    // Stopped (the plugin unloaded): what arrived stays on the server for next time.
+    if (signal?.aborted) {
+      failed.error = new Error('stopped');
+      break;
+    }
+    const length = Math.min(piece, size - offset);
+    const data = await source.read(offset, length);
+    const task = sendPiece(client, begun.id, offset, data).then(
+      () => {
+        sent += length;
+        onProgress?.(sent);
+      },
+      (e: unknown) => { failed.error ??= e instanceof Error ? e : new Error('a piece could not be sent'); },
+    );
+    inFlight.add(task);
+    void task.finally(() => inFlight.delete(task));
+    if (inFlight.size >= PARALLEL) await Promise.race(inFlight);
+  }
+  await Promise.all(inFlight);
+  if (failed.error) throw failed.error;
+}
+
+/** Ask the server to keep the file; a passing failure (its store slow to answer) is tried again. */
+async function finish(client: LibraryClient, id: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.uploadFinish(id);
+      return;
+    } catch (e) {
+      const status = (e as { status?: number }).status ?? 0;
+      if (attempt >= TRIES || (status >= 400 && status < 500)) throw e;
+      await new Promise(r => window.setTimeout(r, 2000 * attempt));
+    }
   }
 }
 

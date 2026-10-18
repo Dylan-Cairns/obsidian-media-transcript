@@ -63,6 +63,10 @@ export class Uploader {
       void this.sweep().then(() => this.flush());
     });
     plugin.registerInterval(window.setInterval(() => void this.sweep().then(() => this.flush()), RETRY_MS));
+    // A phone pauses the app in the background, an upload with it: carry on as soon as it is back.
+    plugin.registerDomEvent(document, 'visibilitychange', () => {
+      if (document.visibilityState === 'visible') void this.sweep().then(() => this.flush());
+    });
   }
 
   /**

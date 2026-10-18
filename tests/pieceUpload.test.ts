@@ -8,14 +8,14 @@ beforeAll(() => {
 });
 
 /** A server keeping pieces by offset, in any order, as Media One does. */
-function fakeServer(opts: { have?: number[]; there?: boolean; failures?: Map<number, number[]> } = {}) {
+function fakeServer(opts: { have?: number[]; there?: boolean; failures?: Map<number, number[]>; finishes?: Array<number | { spoil: number }> } = {}) {
   const pieces = new Map<number, Uint8Array>();
   let finished = false;
   let inFlight = 0;
   let maxInFlight = 0;
   const sentOffsets: number[] = [];
   const client = {
-    uploadBegin: async () => (opts.there ? { entry: {} } : { id: 'u1', piece: PIECE, have: opts.have ?? [] }),
+    uploadBegin: async () => (opts.there ? { entry: {} } : { id: 'u1', piece: PIECE, have: [...new Set([...(opts.have ?? []), ...pieces.keys()])] }),
     uploadPiece: async (_id: string, offset: number, data: ArrayBuffer) => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
@@ -30,7 +30,16 @@ function fakeServer(opts: { have?: number[]; there?: boolean; failures?: Map<num
       }
       pieces.set(offset, new Uint8Array(data));
     },
-    uploadFinish: async () => { finished = true; },
+    uploadFinish: async () => {
+      const next = opts.finishes?.shift();
+      if (typeof next === 'number') throw Object.assign(new Error(`HTTP ${next}`), { status: next });
+      if (next) {
+        // The piece is spoiled on the server's disk: it drops it and asks for it again.
+        pieces.delete(next.spoil);
+        throw Object.assign(new Error('HTTP 409'), { status: 409 });
+      }
+      finished = true;
+    },
   } as unknown as LibraryClient;
   const joined = () => {
     const offsets = [...pieces.keys()].sort((a, b) => a - b);
@@ -150,6 +159,20 @@ describe('uploadInPieces', () => {
     await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]));
     expect(hung).toBe(true);
     expect(same(server.joined(), file)).toBe(true);
+    expect(server.finished).toBe(true);
+  });
+
+  it('sends a piece again when finishing finds it spoiled, then finishes', async () => {
+    const server = fakeServer({ finishes: [{ spoil: 2 * PIECE }] });
+    await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]));
+    expect(server.sentOffsets.filter(o => o === 2 * PIECE)).toHaveLength(2);
+    expect(server.finished).toBe(true);
+    expect(same(server.joined(), file)).toBe(true);
+  });
+
+  it('tries finishing again when the server stumbles', async () => {
+    const server = fakeServer({ finishes: [500, 502] });
+    await uploadInPieces(server.client, () => server.client.uploadBegin('a.mp4', file.length), file.length, streamed([]));
     expect(server.finished).toBe(true);
   });
 
