@@ -275,7 +275,10 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
         toggle.setValue(this.plugin.settings.uploadNewMedia).onChange(async v => {
           this.plugin.settings.uploadNewMedia = v;
           await this.plugin.saveSettings();
-          if (v) void this.plugin.uploader.flush();
+          if (v) {
+            this.plugin.uploader.startCountingFromNow();
+            void this.plugin.uploader.flush();
+          }
         }),
       );
 

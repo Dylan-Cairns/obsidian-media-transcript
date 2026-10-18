@@ -19,9 +19,15 @@ const STREAM_FROM = 64 * 1024 * 1024;
  *
  * Files that can't be uploaded now (no server, no network) wait in a queue
  * kept on this device and are retried every 10 minutes and at startup.
+ *
+ * A file added while Obsidian wasn't running (copied into the vault in the
+ * Finder, say) raises no event; nor does one passed over before (too large
+ * for an earlier version). So at startup and with each retry, media added
+ * since uploading was turned on that the server doesn't have is queued too.
  */
 export class Uploader {
   private running = false;
+  private passedOverList: string[] | null = null;
   private readonly device: DeviceState;
   /** Vault paths this device still has to upload. */
   readonly pending: string[];
@@ -50,9 +56,50 @@ export class Uploader {
       plugin.registerEvent(plugin.app.vault.on('create', f => this.added(f)));
       plugin.registerEvent(plugin.app.vault.on('rename', (f, old) => this.renamed(f, old)));
       plugin.registerEvent(plugin.app.vault.on('delete', f => this.forget(f.path)));
-      void this.flush();
+      void this.sweep().then(() => this.flush());
     });
-    plugin.registerInterval(window.setInterval(() => void this.flush(), RETRY_MS));
+    plugin.registerInterval(window.setInterval(() => void this.sweep().then(() => this.flush()), RETRY_MS));
+  }
+
+  /**
+   * Since when this device uploads what is added: the first time it is seen
+   * with uploading on. What was in the vault before is the backup's to copy.
+   */
+  private since(): number {
+    let since = this.device.get<number>('uploadSince', 0);
+    if (!since) {
+      since = Date.now();
+      this.device.set('uploadSince', since);
+    }
+    return since;
+  }
+
+  /** Uploading turned on: what is added from now on is new; what is there is not. */
+  startCountingFromNow(): void {
+    this.device.set('uploadSince', Date.now());
+  }
+
+  /** Queue media added since uploading was turned on that the server hasn't got. */
+  async sweep(): Promise<number> {
+    if (!this.enabled()) return 0;
+    const since = this.since();
+    const fresh = this.plugin.app.vault.getFiles().filter(f =>
+      this.plugin.isMedia(f) && f.stat.ctime >= since && !this.pending.includes(f.path) && !this.passedOver.includes(f.path));
+    if (fresh.length === 0) return 0;
+    let onServer: Set<string>;
+    try {
+      onServer = new Set((await this.plugin.library.files()).map(e => e.vaultPath));
+    } catch {
+      return 0;  // the server isn't there: the next round
+    }
+    const missing = fresh.filter(f => !onServer.has(f.path)).map(f => f.path);
+    if (missing.length) this.adopt(missing);
+    return missing.length;
+  }
+
+  /** Files this device can't upload (too large for a phone): said once, not every round. */
+  private get passedOver(): string[] {
+    return (this.passedOverList ??= this.device.get<string[]>('passedOver', []));
   }
 
   private enabled(): boolean {
@@ -111,6 +158,8 @@ export class Uploader {
     const stream = Platform.isDesktopApp && adapter instanceof FileSystemAdapter && file.stat.size > STREAM_FROM;
     if (file.stat.size > MAX_BYTES && !stream) {
       new Notice(t('library.uploadTooBig', { name: file.name }));
+      this.passedOver.push(file.path);
+      this.device.set('passedOver', this.passedOver);
       return 'done';
     }
     try {
