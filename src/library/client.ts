@@ -167,6 +167,14 @@ export class LibraryClient {
   }
 
   /** Store `data` at `vaultPath`. True if stored now, false if the server already had this file. */
+  /** Upload a file from disk, streamed (desktop): for media too large to hold in memory. True if stored now. */
+  async uploadFromDisk(vaultPath: string, fullPath: string, size: number, onProgress?: (sent: number) => void): Promise<boolean> {
+    if (!this.configured) throw new LibraryError(0, t('library.noServer'));
+    const { putFile, sha256OfFile } = await import('./streamUpload');
+    const q = new URLSearchParams({ vault: this.vault(), path: vaultPath, sha256: await sha256OfFile(fullPath) });
+    return (await putFile(`${this.server()}/api/upload?${q.toString()}`, fullPath, size, onProgress)) === 201;
+  }
+
   async upload(vaultPath: string, data: ArrayBuffer, sha256: string): Promise<boolean> {
     const q = new URLSearchParams({ vault: this.vault(), path: vaultPath, sha256 });
     const r = await this.call('PUT', `upload?${q.toString()}`, data, 'application/octet-stream');

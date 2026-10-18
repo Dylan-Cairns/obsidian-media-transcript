@@ -1,4 +1,4 @@
-import { Notice, TAbstractFile, TFile } from 'obsidian';
+import { FileSystemAdapter, Notice, Platform, TAbstractFile, TFile } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import { sha256Hex } from './client';
 import { DeviceState } from './deviceState';
@@ -7,8 +7,10 @@ import { t } from '../i18n';
 // A recording still being written grows; wait until it stops.
 const SETTLE_MS = 3000;
 const RETRY_MS = 10 * 60_000;
-// Read whole into memory to hash and send: keep that to what a phone can hold.
+// A phone reads a file whole into memory to hash and send it: keep that to
+// what it can hold. The desktop streams anything large from disk instead.
 const MAX_BYTES = 1024 * 1024 * 1024;
+const STREAM_FROM = 64 * 1024 * 1024;
 
 /**
  * Uploads media added to the vault to the Media One server, so it is on the
@@ -105,13 +107,33 @@ export class Uploader {
     const file = vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return 'done';
     if (!(await this.settled(file))) return 'retry';
-    if (file.stat.size > MAX_BYTES) {
+    const adapter = vault.adapter;
+    const stream = Platform.isDesktopApp && adapter instanceof FileSystemAdapter && file.stat.size > STREAM_FROM;
+    if (file.stat.size > MAX_BYTES && !stream) {
       new Notice(t('library.uploadTooBig', { name: file.name }));
       return 'done';
     }
     try {
-      const data = await vault.readBinary(file);
-      const stored = await this.plugin.library.upload(file.path, data, await sha256Hex(data));
+      let stored: boolean;
+      if (stream && adapter instanceof FileSystemAdapter) {
+        const progress = new Notice(t('library.uploading', { name: file.name, percent: 0 }), 0);
+        const size = file.stat.size;
+        let shown = -1;
+        try {
+          stored = await this.plugin.library.uploadFromDisk(file.path, adapter.getFullPath(file.path), size, sent => {
+            const percent = Math.floor((sent / size) * 100);
+            if (percent === shown) return;
+            shown = percent;
+            // All sent: the server reads it back to check it before keeping it.
+            progress.setMessage(percent >= 100 ? t('library.uploadChecking', { name: file.name }) : t('library.uploading', { name: file.name, percent }));
+          });
+        } finally {
+          progress.hide();
+        }
+      } else {
+        const data = await vault.readBinary(file);
+        stored = await this.plugin.library.upload(file.path, data, await sha256Hex(data));
+      }
       if (stored) new Notice(t('library.uploaded', { name: file.name }));
       this.plugin.mediaLocator.invalidate();
       return 'done';
