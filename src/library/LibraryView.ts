@@ -3,6 +3,7 @@ import type MediaTranscriptPlugin from '../main';
 import type { Job, LibraryFile, TrashItem } from './client';
 import { deleteMedia, renameMedia, restoreMedia } from './actions';
 import { t } from '../i18n';
+import { formatSize } from '../utils/format';
 
 export const VIEW_TYPE_LIBRARY = 'media-one-library';
 
@@ -291,8 +292,3 @@ function nameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-  return `${bytes === 0 ? 0 : Math.max(1, Math.round(bytes / 1e3))} KB`;
-}

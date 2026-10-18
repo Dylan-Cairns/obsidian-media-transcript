@@ -11,11 +11,13 @@ import { MigrateModal } from "./migrate-modal";
 import { findStaleCentralArchives, reconcile } from "./reconcile.ts";
 import { ArchiveServers } from "./servers";
 import { storeFor } from "./store";
+import { VideoEmbeds } from "./videos";
 import { t } from "../../i18n";
 
 export default class ArchiveRedirectPlugin extends ModulePlugin {
 	settings!: ArchiveSettings;
 	readonly servers = new ArchiveServers(this);
+	readonly videos = new VideoEmbeds(this);
 
 	async start() {
 		await this.loadSettings();
@@ -24,8 +26,10 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 		void this.servers.check();
 		this.registerInterval(window.setInterval(() => void this.servers.flushAll(), 10 * 60_000));
 
-		// Reading mode
-		this.registerMarkdownPostProcessor((el, ctx) => this.interceptMedia(el, ctx));
+		// Reading mode. Early, so video links become players before other plugins
+		// (Auto Embed) put frames of their own around them.
+		this.registerMarkdownPostProcessor((el, ctx) => this.interceptMedia(el, ctx), -100);
+		this.videos.start();
 
 		// Live Preview / Source mode (CM6)
 		this.registerEditorExtension(createLivePreviewExtension(this));
@@ -97,6 +101,7 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 	}
 
 	private interceptMedia(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+		this.videos.decorate(el, ctx.sourcePath, false);
 		// Not awaited: Obsidian holds the whole note back until a returned promise
 		// settles, and the server check behind it can take seconds, or longer in a
 		// background window. Images are swapped once it answers.

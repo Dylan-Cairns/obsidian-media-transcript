@@ -16,6 +16,13 @@ export type DownloadResult =
 
 const RETRY_BACKOFFS_MS = [0, 1000, 3000]; // 3 次尝试: 立刻 / +1s / +3s
 const REQUEST_TIMEOUT_MS = 15_000;
+
+export interface DownloadOptions {
+	/** Asked for (a video's download button): policies that archive only on request allow it. */
+	onDemand?: boolean;
+	/** Per attempt; a large video needs much longer than an image. */
+	timeoutMs?: number;
+}
 const PERMANENT_STATUSES = new Set([400, 401, 403, 404, 410, 451]);
 
 export async function download(
@@ -24,13 +31,14 @@ export async function download(
 	vault: Vault,
 	settings: ArchiveSettings,
 	servers: ArchiveServers,
+	options: DownloadOptions = {},
 ): Promise<DownloadResult> {
 	// null on mobile with the archive folder outside the vault: there, servers are the only archive.
 	const dest = storeFor(vault, destPath);
 	if (dest && (await dest.store.exists(dest.path))) return "skipped-exists";
 
 	const policy = matchPolicy(url);
-	if (!policy.archive) return "skipped-policy";
+	if (!policy.archive && !(options.onDemand && policy.onDemand)) return "skipped-policy";
 
 	// Kept here too, or on the servers only (and here just until they have it).
 	const kept = dest && keepsLocal(settings) ? dest : null;
@@ -60,7 +68,7 @@ export async function download(
 		try {
 			const response = await Promise.race([
 				requestUrl({ url: fetchUrl, headers, throw: false }),
-				rejectAfter<Awaited<ReturnType<typeof requestUrl>>>(REQUEST_TIMEOUT_MS),
+				rejectAfter<Awaited<ReturnType<typeof requestUrl>>>(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
 			]);
 
 			if (response.status === 200) {

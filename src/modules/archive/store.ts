@@ -24,8 +24,12 @@ export function storeFor(vault: Vault, path: string): { store: Store; path: stri
  */
 export function desktopNode(): { fs: typeof import("fs"); os: typeof import("os") } | null {
 	if (!Platform.isDesktopApp) return null;
-	// eslint-disable-next-line @typescript-eslint/no-require-imports -- see above
-	return { fs: require("fs") as typeof import("fs"), os: require("os") as typeof import("os") };
+	/* eslint-disable @typescript-eslint/no-require-imports -- see above */
+	const fs = require("fs") as typeof import("fs") | null;
+	const os = require("os") as typeof import("os") | null;
+	/* eslint-enable @typescript-eslint/no-require-imports -- end of the lazy requires */
+	// Missing in the desktop app's phone emulation.
+	return fs && os ? { fs, os } : null;
 }
 
 const fsStore = ({ promises: fs }: typeof import("fs")): Store => ({
