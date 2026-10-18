@@ -87,14 +87,6 @@ describe('reading view repaint', () => {
     }
     expect(first.root.firstElementChild).toBe(block);
     expect(first.root.querySelector('em')).toBe(emphasis);
-    const mark = first.root.querySelector('.at-hl');
-    const range = document.createRange();
-    range.selectNodeContents(mark!);
-    document.getSelection()!.removeAllRanges();
-    document.getSelection()!.addRange(range);
-    repaintReadingViews(app, path => annotations[path] ?? []);
-    expect(first.root.querySelector('.at-hl')).toBe(mark);
-    expect(document.getSelection()!.toString()).toBe('beta');
     a.body = 'New comment';
     repaintReadingViews(app, path => annotations[path] ?? []);
     expect(first.root.querySelector('.at-hl-comment')?.textContent).toBe('beta');
@@ -104,6 +96,22 @@ describe('reading view repaint', () => {
     expect(first.root.firstElementChild).toBe(block);
     expect(first.root.querySelector('em')).toBe(emphasis);
     expect(first.root.textContent).toBe('alpha beta');
+  });
+
+  it('preserves text selection during an unchanged repaint', () => {
+    const annotations = { 'host.md': [annotation('a', 'beta', 6)] };
+    const host = view('host.md', 'alpha beta', '<p>alpha <em>beta</em></p>');
+    processSection(host.root.firstElementChild as HTMLElement, 'host.md', 'alpha beta', annotations);
+    const mark = host.root.querySelector('.at-hl');
+    const range = document.createRange();
+    range.selectNodeContents(mark!);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(range);
+
+    repaintReadingViews(appFor(host), path => annotations[path] ?? []);
+
+    expect(host.root.querySelector('.at-hl')).toBe(mark);
+    expect(document.getSelection()!.toString()).toBe('beta');
   });
 
   it('keeps nested marks scoped to their file and updates and deletes them there', () => {
@@ -159,7 +167,7 @@ describe('reading view repaint', () => {
     expect(embeddedBlock.querySelector('.at-hl')).toBeNull();
   });
 
-  it('clears an obsolete anchor when a cached section is reattached', () => {
+  it('refreshes annotations changed while a section was detached', () => {
     const a = annotation('a', 'alpha');
     const annotations = { 'host.md': [a] };
     const host = view('host.md', 'alpha beta', '<p>alpha beta</p>');
