@@ -159,10 +159,6 @@ export default class ArchiveRedirectPlugin extends ModulePlugin {
 		);
 	}
 
-	onunload() {
-		this.videos.dispose();
-	}
-
 	async loadSettings() {
 		// Saved settings from any earlier version: the current fields, plus 0.6.0's serverUrl/sourceOrder.
 		const raw = ((await this.loadData()) ?? {}) as Partial<ArchiveSettings> & { serverUrl?: unknown; sourceOrder?: unknown; pendingUploads?: unknown };

@@ -31,8 +31,6 @@ export class VideoEmbeds {
 	private states = new Map<string, State>();
 	/** When each video's state was last asked of the servers: asked again after a while (it may be deleted meanwhile). */
 	private checkedAt = new Map<string, number>();
-	/** Videos fetched to play from memory (see playWithoutReferrer), freed on unload. */
-	private objectUrls = new Set<string>();
 	/** The bars on screen, by video URL, to update them all when one is downloaded. */
 	private bars = new Map<string, Set<HTMLElement>>();
 
@@ -44,6 +42,7 @@ export class VideoEmbeds {
 
 	start(): void {
 		const { plugin } = this;
+		this.sendNoReferrer();
 		// A transcript arriving, or a job moving on, shows on the bars.
 		plugin.registerEvent(plugin.app.vault.on("create", (f) => {
 			if (f.path.endsWith(".json")) window.setTimeout(() => this.repaintAll(), 1500);
@@ -108,7 +107,6 @@ export class VideoEmbeds {
 			box.dataset.note = sourcePath;
 			const video = box.createEl("video", { attr: { controls: "", preload: "metadata", playsinline: "", referrerpolicy: "no-referrer", src: url } });
 			video.dataset.moVideo = "1";
-			video.addEventListener("error", () => void this.playWithoutReferrer(video, url));
 			box.appendChild(this.bar(url, sourcePath));
 			target.parentElement?.insertBefore(box, target);
 			if (inEditor || target !== el) target.addClass("mo-video-replaced");
@@ -116,38 +114,20 @@ export class VideoEmbeds {
 		}
 	}
 
-	/**
-	 * Some hosts (video.twimg.com) refuse a video whose request names the page
-	 * it is on, and a <video> can't be told not to. On a phone Obsidian's page
-	 * is http://localhost, which they refuse; the desktop app's isn't. So when
-	 * the original link fails, fetch it without saying where from and play it
-	 * from memory: up to what a phone can hold.
-	 */
-	private async playWithoutReferrer(video: HTMLVideoElement, url: string): Promise<void> {
-		if (video.dataset.moRefetched || video.getAttribute("src") !== url) return;
-		video.dataset.moRefetched = "1";
-		try {
-			const head = await fetch(url, { method: "HEAD", referrerPolicy: "no-referrer" });
-			const size = Number(head.headers.get("content-length"));
-			if (!head.ok || (Number.isFinite(size) && size > PHONE_MAX_BYTES)) return;
-			const blob = await (await fetch(url, { referrerPolicy: "no-referrer" })).blob();
-			if (!video.isConnected) return;
-			const objectUrl = URL.createObjectURL(blob);
-			this.objectUrls.add(objectUrl);
-			video.setAttribute("src", objectUrl);
-		} catch (e) {
-			console.warn(`[media-one] ${url} can't be played:`, e);
-		}
-	}
-
-	/** Free the videos fetched into memory. */
-	dispose(): void {
-		for (const u of this.objectUrls) URL.revokeObjectURL(u);
-		this.objectUrls.clear();
-	}
-
 	private hasPlayer(root: HTMLElement, url: string): boolean {
 		return Array.from(root.querySelectorAll<HTMLElement>(".mo-video")).some((b) => b.dataset.url === url);
+	}
+
+	/**
+	 * Some hosts (video.twimg.com) refuse a video whose request names the page
+	 * it is on. The desktop app's page (app://obsidian.md) is never named; a
+	 * phone's (http://localhost) is, so there such videos don't play. A page-wide
+	 * referrer policy makes the phone send what the desktop does: nothing.
+	 */
+	private sendNoReferrer(): void {
+		if (!/^https?:$/.test(window.location.protocol) || document.querySelector('meta[name="referrer"]')) return;
+		const meta = document.head.createEl("meta", { attr: { name: "referrer", content: "no-referrer" } });
+		this.plugin.register(() => meta.remove());
 	}
 
 	private bar(url: string, sourcePath: string): HTMLElement {
