@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt } from '../src/library/mediaInfo';
+import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt, withoutDate } from '../src/library/mediaInfo';
 
 describe('recordedAt', () => {
   it('reads the moment a recorder put in the name', () => {
@@ -67,5 +67,16 @@ describe('isGenericName', () => {
     expect(isGenericName('Pasted Image 20261009164946_322.png')).toBe(true);
     expect(isGenericName('高买低卖也赚钱！2016-1-10 PM4 24.m4a')).toBe(false);
     expect(isGenericName('周会.m4a')).toBe(false);
+  });
+});
+
+describe('withoutDate', () => {
+  it('drops the date and time a name carries', () => {
+    expect(withoutDate('首秀滴水不漏！2016-03-12 23 12')).toBe('首秀滴水不漏！');
+    expect(withoutDate('猴年开盘前消息面综合分析。 2016-2-14 AM11 33')).toBe('猴年开盘前消息面综合分析。');
+    expect(withoutDate('初五迎财神！王斌 2016-2-12 PM8 22')).toBe('初五迎财神！王斌');
+    expect(withoutDate('周会')).toBe('周会');
+    expect(withoutDate('Recording 20260902210306')).toBe('Recording');
+    expect(withoutDate('2026-09-02')).toBe('2026-09-02');
   });
 });

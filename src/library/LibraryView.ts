@@ -21,6 +21,7 @@ export class LibraryView extends ItemView {
   private statusEl!: HTMLElement;
   private tab: 'media' | 'archive' = 'media';
   private tabsEl!: HTMLElement;
+  private searchEl!: HTMLInputElement;
   private readonly media: MediaList;
   private readonly archive: ArchiveList;
 
@@ -55,7 +56,7 @@ export class LibraryView extends ItemView {
     root.empty();
     root.addClass('mo-lib');
     const bar = root.createDiv('mo-lib-bar');
-    const search = bar.createEl('input', { type: 'search', placeholder: t('library.filterPlaceholder'), cls: 'mo-lib-search' });
+    const search = (this.searchEl = bar.createEl('input', { type: 'search', placeholder: t('library.filterPlaceholder'), cls: 'mo-lib-search' }));
     search.addEventListener('input', () => {
       this.filter = search.value.trim().toLowerCase();
       this.renderList();
@@ -93,6 +94,7 @@ export class LibraryView extends ItemView {
     listEl.empty();
     statusEl.empty();
     this.tabsEl.querySelectorAll<HTMLElement>('.mo-lib-tab').forEach(b => b.toggleClass('is-active', b.dataset.tab === this.tab));
+    this.searchEl.placeholder = t(this.tab === 'archive' ? 'library.filterArchive' : 'library.filterPlaceholder');
     if (this.tab === 'archive') this.archive.render(listEl, statusEl, this.filter);
     else this.media.render(listEl, statusEl, this.filter);
   }

@@ -88,3 +88,18 @@ export function openingWords(transcriptText: string, max = 40): string {
 export function isDatedName(name: string): boolean {
   return /^\d{4}-\d{2}-\d{2}(\s|$)/.test(name) && name.length <= 16;
 }
+
+/**
+ * A chosen name without the date and time it carries, which the row shows
+ * on its own line already: "首秀滴水不漏！2016-03-12 23 12" → "首秀滴水不漏！".
+ * The name as it was if nothing would be left.
+ */
+export function withoutDate(base: string): string {
+  const out = base
+    .replace(/(?<!\d)20\d{2}-\d{1,2}-\d{1,2}(?:[ T_]*(?:[AP]M)?\s*\d{1,2}(?:[ .:]\d{2}){1,2})?/gi, ' ')
+    .replace(/(?<!\d)20\d{12}(?=\D|$)/g, ' ')
+    .replace(/[\s_\-·]+$/g, '')
+    .replace(/^[\s_\-·]+/g, '')
+    .trim();
+  return out || base;
+}

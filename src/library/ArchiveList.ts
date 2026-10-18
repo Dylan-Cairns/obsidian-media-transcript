@@ -99,7 +99,11 @@ export class ArchiveList {
         || (this.kind === 'unused' && !this.refs.get(f.name)?.notes.length))
       .filter(f => !filter || this.searchText(f).includes(filter))
       .sort((a, b) => this.sort === 'size' ? b.size - a.size : b.modified.localeCompare(a.modified));
-    for (const f of shown.slice(0, this.limit)) this.renderRow(list, f);
+    const page = shown.slice(0, this.limit);
+    // By date: grouped by the note they are in, as a wall of thumbnails. By
+    // size: one list, to find what takes the room.
+    if (this.sort === 'size') for (const f of page) this.renderRow(list, f);
+    else this.renderGroups(list, page);
     if (shown.length > this.limit) {
       const more = list.createEl('button', { cls: 'mo-lib-more', text: t('library.archiveShowMore', { count: Math.min(PAGE, shown.length - this.limit) }) });
       more.addEventListener('click', () => {
@@ -146,6 +150,55 @@ export class ArchiveList {
   private searchText(f: ArchiveFile): string {
     const ref = this.refs.get(f.name);
     return [f.name, f.url ?? '', ref?.url ?? '', ...(ref?.notes.map(n => n.path) ?? [])].join('\n').toLowerCase();
+  }
+
+  private renderGroups(list: HTMLElement, files: ArchiveFile[]): void {
+    const groups = new Map<string, ArchiveFile[]>();
+    for (const f of files) {
+      const key = this.refs.get(f.name)?.notes[0]?.path ?? '';
+      groups.set(key, [...(groups.get(key) ?? []), f]);
+    }
+    for (const [key, members] of groups) {
+      const note = key ? this.plugin.app.vault.getAbstractFileByPath(key) : null;
+      const head = list.createDiv('mo-lib-group');
+      const title = head.createDiv({ cls: 'mo-lib-group-title', text: note instanceof TFile ? note.basename : t('library.archiveUnusedGroup') });
+      if (note instanceof TFile) {
+        title.addClass('is-link');
+        title.addEventListener('click', () => { void this.plugin.app.workspace.getLeaf(false).openFile(note); });
+      }
+      head.createDiv({ cls: 'mo-lib-group-meta', text: `${members.length} · ${formatSize(members.reduce((n, f) => n + f.size, 0))}` });
+      const grid = list.createDiv('mo-lib-grid');
+      for (const f of members) this.renderTile(grid, f);
+    }
+  }
+
+  private renderTile(grid: HTMLElement, f: ArchiveFile): void {
+    const ref = this.refs.get(f.name);
+    const url = ref?.url ?? f.url;
+    const ext = extOf(f.name);
+    const transcript = VIDEO_EXTS.has(ext) ? this.plugin.transcripts.transcriptsFor(f.name.slice(3)).find(x => x.extension === 'json') : undefined;
+    const tile = grid.createDiv({ cls: 'mo-lib-tile', attr: { title: `${url ? tail(url) : f.name.slice(3)} · ${formatSize(f.size)}` } });
+    if (IMAGE_EXTS.has(ext)) {
+      tile.createEl('img', { attr: { src: this.plugin.library.archiveUrl(f.name), loading: 'lazy', alt: '' } });
+    } else if (VIDEO_EXTS.has(ext)) {
+      const video = tile.createEl('video', { attr: { preload: 'none', muted: '', playsinline: '' } });
+      whenVisible(tile, () => {
+        video.preload = 'metadata';
+        video.src = `${this.plugin.library.archiveUrl(f.name)}#t=1`;
+      });
+      setIcon(tile.createDiv('mo-lib-tile-badge'), transcript ? 'captions' : 'play');
+    } else {
+      setIcon(tile, 'file');
+    }
+    tile.addEventListener('click', () => {
+      if (transcript) void this.plugin.openTranscript(transcript);
+      else if (ref?.notes[0]) void this.plugin.app.workspace.getLeaf(false).openFile(ref.notes[0]);
+      else window.open(this.plugin.library.archiveUrl(f.name));
+    });
+    tile.addEventListener('contextmenu', evt => {
+      evt.preventDefault();
+      this.menu(evt, f, ref, url, transcript);
+    });
   }
 
   private renderRow(list: HTMLElement, f: ArchiveFile): void {

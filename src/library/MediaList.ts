@@ -1,7 +1,7 @@
 import { Menu, Notice, TFile, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import type { IndexEntry, Job, TrashItem } from './client';
-import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt } from './mediaInfo';
+import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt, withoutDate } from './mediaInfo';
 import { formatSize } from '../utils/format';
 import { obsidianLanguage, t } from '../i18n';
 
@@ -58,7 +58,8 @@ export class MediaList {
   private error: string | null = null;
   /** Read from each shown transcript once: the media's length and opening words. */
   private details = new Map<string, { duration: number | null; words: string }>();
-  private playing: HTMLElement | null = null;
+  /** The row playing inline: its audio, its play button, and the bar under it. */
+  private playing: { row: HTMLElement; audio: HTMLAudioElement; button: HTMLElement; bar: HTMLElement } | null = null;
 
   constructor(private readonly plugin: MediaTranscriptPlugin, private readonly host: MediaHost) {}
 
@@ -131,7 +132,7 @@ export class MediaList {
         backedUp: !!e.backup && Object.keys(e.backup).length > 0,
         // Its own media was uploaded as it was made; a collection was brought in all at once.
         recorded: recordedAt(name) ?? (collection === this.own && e.added ? new Date(e.added) : null),
-        title: notes[0] && !isDatedName(notes[0].basename) ? notes[0].basename : base,
+        title: notes[0] && !isDatedName(notes[0].basename) ? notes[0].basename : isGenericName(name) ? base : withoutDate(base),
         notes,
         transcript,
       };
@@ -139,6 +140,7 @@ export class MediaList {
   }
 
   render(list: HTMLElement, status: HTMLElement, filter: string): void {
+    this.stop();  // its row is about to be redrawn
     if (this.error) {
       status.createSpan({ cls: 'mo-lib-error', text: this.error });
       return;
@@ -201,8 +203,12 @@ export class MediaList {
   private renderRow(list: HTMLElement, it: Item): void {
     const row = list.createDiv('mo-lib-row mo-lib-media-row');
     row.dataset.path = it.path;
-    const icon = row.createDiv({ cls: 'mo-lib-kind', attr: { 'aria-label': it.transcript ? t('library.menuOpenTranscript') : t('library.menuPlay') } });
-    setIcon(icon, it.transcript ? 'file-text' : 'play');
+    const playButton = row.createEl('button', { cls: 'mo-lib-play', attr: { 'aria-label': t('library.menuPlay') } });
+    setIcon(playButton, 'play');
+    playButton.addEventListener('click', evt => {
+      evt.stopPropagation();
+      this.play(it, row, playButton);
+    });
     const main = row.createDiv('mo-lib-main');
     const title = main.createDiv({ cls: 'mo-lib-name', text: it.title });
     const meta = main.createDiv('mo-lib-meta');
@@ -210,14 +216,18 @@ export class MediaList {
     const facts = meta.createSpan();
     const context = main.createDiv({ cls: 'mo-lib-file' });
     const base = it.name.slice(0, it.name.lastIndexOf('.'));
-    const generic = isGenericName(it.name) && it.title === base;
+    const generic = isGenericName(it.name) && !it.notes.some(n => n.basename === it.title);
     const show = (d?: { duration: number | null; words: string }) => {
-      facts.setText([when, d?.duration ? formatDuration(d.duration) : '', formatSize(it.size)].filter(Boolean).join(' · '));
+      facts.setText([when, d?.duration && d.duration >= 1 ? formatDuration(d.duration) : '', formatSize(it.size)].filter(Boolean).join(' · '));
       // A name a recorder gave (a timestamp) says least: then what was said
       // names it best. A name someone chose is kept.
       const name = (generic && d?.words) || it.title;
       title.setText(name);
-      const parts = [it.notes[0]?.basename, it.name].filter((x): x is string => !!x && x !== name && !(x === it.name && name === base));
+      // Then where it comes from: the note (a daily note's name is the date
+      // already shown), and the file, unless its name is only a timestamp.
+      const note = it.notes[0] && !isDatedName(it.notes[0].basename) ? it.notes[0].basename : null;
+      const file = generic || it.name.startsWith(name) ? null : it.name;
+      const parts = [note, file].filter((x): x is string => !!x && x !== name);
       context.setText(parts.join(' · '));
       context.toggle(parts.length > 0);
     };
@@ -239,12 +249,11 @@ export class MediaList {
       meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeOnDevice') });
     }
 
-    const open = () => {
+    // The row opens its transcript (which plays it too); the button just plays it here.
+    main.addEventListener('click', () => {
       if (it.transcript) void this.plugin.openTranscript(it.transcript);
-      else this.play(it, row);
-    };
-    icon.addEventListener('click', open);
-    main.addEventListener('click', open);
+      else this.play(it, row, playButton);
+    });
     const more = row.createEl('button', { cls: 'clickable-icon mo-lib-more-actions', attr: { 'aria-label': t('library.moreActions') } });
     setIcon(more, 'more-horizontal');
     more.addEventListener('click', evt => this.menu(evt, it, row));
@@ -270,7 +279,8 @@ export class MediaList {
 
   private menu(evt: MouseEvent, it: Item, row: HTMLElement): void {
     const menu = new Menu();
-    menu.addItem(i => i.setTitle(t('library.menuPlay')).setIcon('play').onClick(() => this.play(it, row)));
+    const button = row.querySelector<HTMLElement>('.mo-lib-play');
+    if (button) menu.addItem(i => i.setTitle(t('library.menuPlay')).setIcon('play').onClick(() => this.play(it, row, button)));
     if (it.transcript) {
       const tr = it.transcript;
       menu.addItem(i => i.setTitle(t('library.menuOpenTranscript')).setIcon('file-text').onClick(() => { void this.plugin.openTranscript(tr); }));
@@ -299,20 +309,50 @@ export class MediaList {
     menu.showAtMouseEvent(evt);
   }
 
-  private play(it: Item, row: HTMLElement): void {
-    const again = this.playing?.parentElement === row;
+  /** Play `it` in its row, or pause and resume it if it is the one playing. */
+  private play(it: Item, row: HTMLElement, button: HTMLElement): void {
+    if (this.playing?.row === row) {
+      const { audio } = this.playing;
+      if (audio.paused) void audio.play().catch(() => {});
+      else audio.pause();
+      return;
+    }
     this.stop();
-    if (again) return;
-    const holder = row.createDiv('mo-lib-player');
-    const audio = holder.createEl('audio', { attr: { controls: '', src: this.plugin.library.libraryUrl(it.path) } });
-    this.playing = holder;
-    void audio.play().catch(() => { /* the controls are there to try again */ });
+    const audio = new Audio(this.plugin.library.libraryUrl(it.path));
+    audio.preload = 'auto';
+    const bar = row.createDiv('mo-lib-progress');
+    const seek = bar.createEl('input', { type: 'range', attr: { min: '0', max: '1000', value: '0', 'aria-label': t('library.seek') } });
+    const time = bar.createSpan({ cls: 'mo-lib-progress-time', text: '0:00' });
+    const close = bar.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('library.stop') } });
+    setIcon(close, 'x');
+    close.addEventListener('click', () => this.stop());
+    const paint = () => {
+      const d = Number.isFinite(audio.duration) ? audio.duration : 0;
+      if (d) seek.value = String(Math.round((audio.currentTime / d) * 1000));
+      time.setText(d ? `${formatDuration(audio.currentTime)} / ${formatDuration(d)}` : formatDuration(audio.currentTime));
+      seek.style.setProperty('--mo-progress', `${Number(seek.value) / 10}%`);
+    };
+    seek.addEventListener('input', () => {
+      if (Number.isFinite(audio.duration)) audio.currentTime = (Number(seek.value) / 1000) * audio.duration;
+      paint();
+    });
+    audio.addEventListener('timeupdate', paint);
+    audio.addEventListener('loadedmetadata', paint);
+    audio.addEventListener('play', () => { setIcon(button, 'pause'); row.addClass('is-playing'); });
+    audio.addEventListener('pause', () => { setIcon(button, 'play'); });
+    audio.addEventListener('ended', () => this.stop());
+    this.playing = { row, audio, button, bar };
+    void audio.play().catch(() => { setIcon(button, 'play'); });
   }
 
   stop(): void {
     if (!this.playing) return;
-    this.playing.querySelector('audio')?.pause();
-    this.playing.remove();
+    const { audio, button, bar, row } = this.playing;
+    audio.pause();
+    audio.removeAttribute('src');
+    bar.remove();
+    setIcon(button, 'play');
+    row.removeClass('is-playing');
     this.playing = null;
   }
 

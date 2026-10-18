@@ -1,7 +1,8 @@
 /** Text shown by the library part of the plugin. Keys start with "library.". */
 const en = {
   'library.viewTitle': 'Media library',
-  'library.filterPlaceholder': 'Filter by name or folder',
+  'library.filterPlaceholder': 'Search recordings and notes',
+  'library.filterArchive': 'Search the archive, notes, links',
   'library.refresh': 'Refresh',
   'library.notConfigured': 'Set your Media One server in the settings to see its library.',
   'library.status': '{count} files on the server, {size}',
@@ -20,6 +21,9 @@ const en = {
   'library.badgeNoTranscript': 'no transcript',
   'library.moreActions': 'More',
   'library.menuCopyLink': 'Copy link',
+  'library.archiveUnusedGroup': 'Shown by no note here',
+  'library.seek': 'Position',
+  'library.stop': 'Stop',
   'library.tabMedia': 'Media',
   'library.tabArchive': 'Archive',
   'library.archiveStatus': 'Archive: {count} files, {size}',
@@ -86,7 +90,8 @@ const en = {
 
 const zh: Partial<Record<keyof typeof en, string>> = {
   'library.viewTitle': '媒体库',
-  'library.filterPlaceholder': '按名称或文件夹筛选',
+  'library.filterPlaceholder': '搜索录音、笔记',
+  'library.filterArchive': '搜索归档、笔记、链接',
   'library.refresh': '刷新',
   'library.notConfigured': '请在设置中填写 Media One 服务器，以查看其媒体库。',
   'library.status': '服务器上共 {count} 个文件，{size}',
@@ -105,6 +110,9 @@ const zh: Partial<Record<keyof typeof en, string>> = {
   'library.badgeNoTranscript': '无转录稿',
   'library.moreActions': '更多',
   'library.menuCopyLink': '复制链接',
+  'library.archiveUnusedGroup': '本库没有笔记引用',
+  'library.seek': '播放位置',
+  'library.stop': '停止',
   'library.tabMedia': '媒体',
   'library.tabArchive': '归档',
   'library.archiveStatus': '归档共 {count} 个文件，{size}',
