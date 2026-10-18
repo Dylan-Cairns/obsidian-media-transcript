@@ -2,14 +2,15 @@ import { FileSystemAdapter, Notice, Platform, TAbstractFile, TFile } from 'obsid
 import type MediaTranscriptPlugin from '../main';
 import { sha256Hex } from './client';
 import { DeviceState } from './deviceState';
+import { uploadInPieces } from './pieceUpload';
 import { t } from '../i18n';
 
 // A recording still being written grows; wait until it stops.
 const SETTLE_MS = 3000;
 const RETRY_MS = 10 * 60_000;
-// A phone reads a file whole into memory to hash and send it: keep that to
-// what it can hold. The desktop streams anything large from disk instead.
-const MAX_BYTES = 1024 * 1024 * 1024;
+// Up to this, a file is read whole and sent in one request. Larger, the
+// desktop streams it from disk in one request, and a phone (which can't)
+// sends it a piece at a time, carrying on after a break.
 const STREAM_FROM = 64 * 1024 * 1024;
 
 /**
@@ -27,7 +28,6 @@ const STREAM_FROM = 64 * 1024 * 1024;
  */
 export class Uploader {
   private running = false;
-  private passedOverList: string[] | null = null;
   private readonly device: DeviceState;
   /** Vault paths this device still has to upload. */
   readonly pending: string[];
@@ -84,7 +84,7 @@ export class Uploader {
     if (!this.enabled()) return 0;
     const since = this.since();
     const fresh = this.plugin.app.vault.getFiles().filter(f =>
-      this.plugin.isMedia(f) && f.stat.ctime >= since && !this.pending.includes(f.path) && !this.passedOver.includes(f.path));
+      this.plugin.isMedia(f) && f.stat.ctime >= since && !this.pending.includes(f.path));
     if (fresh.length === 0) return 0;
     let onServer: Set<string>;
     try {
@@ -95,11 +95,6 @@ export class Uploader {
     const missing = fresh.filter(f => !onServer.has(f.path)).map(f => f.path);
     if (missing.length) this.adopt(missing);
     return missing.length;
-  }
-
-  /** Files this device can't upload (too large for a phone): said once, not every round. */
-  private get passedOver(): string[] {
-    return (this.passedOverList ??= this.device.get<string[]>('passedOver', []));
   }
 
   private enabled(): boolean {
@@ -155,27 +150,34 @@ export class Uploader {
     if (!(file instanceof TFile)) return 'done';
     if (!(await this.settled(file))) return 'retry';
     const adapter = vault.adapter;
-    const stream = Platform.isDesktopApp && adapter instanceof FileSystemAdapter && file.stat.size > STREAM_FROM;
-    if (file.stat.size > MAX_BYTES && !stream) {
-      new Notice(t('library.uploadTooBig', { name: file.name }));
-      this.passedOver.push(file.path);
-      this.device.set('passedOver', this.passedOver);
-      return 'done';
-    }
+    const large = file.stat.size > STREAM_FROM;
+    const stream = large && Platform.isDesktopApp && adapter instanceof FileSystemAdapter;
     try {
       let stored: boolean;
-      if (stream && adapter instanceof FileSystemAdapter) {
-        const progress = new Notice(t('library.uploading', { name: file.name, percent: 0 }), 0);
+      if (large) {
         const size = file.stat.size;
+        const progress = new Notice(t('library.uploading', { name: file.name, percent: 0 }), 0);
         let shown = -1;
+        const onProgress = (sent: number) => {
+          const percent = Math.floor((sent / size) * 100);
+          if (percent === shown) return;
+          shown = percent;
+          // All sent: the server reads it back to check it before keeping it.
+          progress.setMessage(percent >= 100 ? t('library.uploadChecking', { name: file.name }) : t('library.uploading', { name: file.name, percent }));
+        };
         try {
-          stored = await this.plugin.library.uploadFromDisk(file.path, adapter.getFullPath(file.path), size, sent => {
-            const percent = Math.floor((sent / size) * 100);
-            if (percent === shown) return;
-            shown = percent;
-            // All sent: the server reads it back to check it before keeping it.
-            progress.setMessage(percent >= 100 ? t('library.uploadChecking', { name: file.name }) : t('library.uploading', { name: file.name, percent }));
-          });
+          if (stream && adapter instanceof FileSystemAdapter) {
+            stored = await this.plugin.library.uploadFromDisk(file.path, adapter.getFullPath(file.path), size, onProgress);
+          } else {
+            // The app serves vault files with ranges: read from where the server is, as a stream.
+            const url = vault.getResourcePath(file);
+            stored = await uploadInPieces(this.plugin.library, file.path, size, async offset => {
+              const r = await fetch(url, { headers: { Range: `bytes=${offset}-` } });
+              if (!r.ok || !r.body) throw new Error(`can't read ${file.path} (${r.status})`);
+              if (offset > 0 && r.status !== 206) throw new Error(`can't read ${file.path} from the middle`);
+              return r.body;
+            }, onProgress);
+          }
         } finally {
           progress.hide();
         }

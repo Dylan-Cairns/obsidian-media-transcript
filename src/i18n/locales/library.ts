@@ -89,7 +89,6 @@ const en = {
   'library.annotationsKept': 'Kept {path}: {target} already exists.',
   'library.unreachable': 'The Media One server cannot be reached.',
   'library.noServer': 'No Media One server is set.',
-  'library.uploadTooBig': 'Media One: {name} is over the 1 GB a phone can upload; upload it from a computer.',
   'library.uploaded': 'Uploaded {name} to the Media One server',
   'library.uploadConflict': 'Media One: the server already has a different {name} at {path}; not uploaded.',
 } as const;
@@ -184,7 +183,6 @@ const zh: Partial<Record<keyof typeof en, string>> = {
   'library.annotationsKept': '已保留 {path}：{target} 已存在。',
   'library.unreachable': '无法连接 Media One 服务器。',
   'library.noServer': '尚未设置 Media One 服务器。',
-  'library.uploadTooBig': 'Media One：{name} 超过手机能上传的 1 GB，请在电脑上上传。',
   'library.uploaded': '已将 {name} 上传到 Media One 服务器',
   'library.uploadConflict': 'Media One：服务器在 {path} 已有另一个不同的 {name}，未上传。',
 };
