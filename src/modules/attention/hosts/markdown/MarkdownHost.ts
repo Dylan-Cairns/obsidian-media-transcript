@@ -605,8 +605,9 @@ export class MarkdownHost {
   }
 
   private promptComment(file: TFile, anchor: MarkdownAnchor, initial: string): void {
+    const clearSelection = readingSelectionCleanup();
     new CommentModal(this.app, anchor.quote, initial, body => {
-      void this.mark(file, anchor, body || null);
+      void this.mark(file, anchor, body || null, clearSelection);
     }).open();
   }
 
@@ -616,17 +617,22 @@ export class MarkdownHost {
   }
 
   private async editComment(file: TFile, id: string): Promise<void> {
+    const clearSelection = readingSelectionCleanup();
     const data = await this.store.get(file.path);
     const annotation = data.annotations.find(a => a.id === id);
     if (!annotation) return;
     new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
-      void this.store.update(file.path, id, { body: body || null });
+      void this.store.update(file.path, id, { body: body || null }).then(clearSelection);
     }).open();
   }
 
-  private async mark(file: TFile, anchor: MarkdownAnchor, body: string | null): Promise<void> {
+  private async mark(
+    file: TFile, anchor: MarkdownAnchor, body: string | null,
+    clearSelection = readingSelectionCleanup(),
+  ): Promise<void> {
     try {
       const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+      clearSelection();
       if (repeat) new Notice(t('attention.noticeMarkedTimes', { count: annotation.hits.length }));
     } catch (e) {
       if (!(e instanceof WrongNoteError)) throw e;
@@ -635,3 +641,18 @@ export class MarkdownHost {
   }
 }
 
+/** Capture before opening a modal; clear only this selection after a successful save. */
+export function readingSelectionCleanup(): () => void {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+  const reading = range && elementOf(range.commonAncestorContainer)?.closest('.markdown-preview-view');
+  return () => {
+    if (!reading || !range || !selection || selection.rangeCount !== 1) return;
+    // Live ranges follow repaint mutations; a replacement selection must be left alone.
+    const current = selection.getRangeAt(0);
+    if (current.compareBoundaryPoints(Range.START_TO_START, range) === 0 &&
+        current.compareBoundaryPoints(Range.END_TO_END, range) === 0) {
+      selection.removeAllRanges();
+    }
+  };
+}

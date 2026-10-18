@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App, MarkdownView } from 'obsidian';
 import { readingModeHighlighter, repaintReadingViews } from '../../src/modules/attention/hosts/markdown/readingMode';
+import { readingSelectionCleanup } from '../../src/modules/attention/hosts/markdown/MarkdownHost';
 import { Annotation } from '../../src/modules/attention/model';
 
-vi.mock('obsidian', () => ({ MarkdownView: class {} }));
+vi.mock('obsidian', () => ({ MarkdownView: class {}, Modal: class {}, moment: vi.fn() }));
 
 function annotation(id: string, quote: string, from = 0): Annotation {
   return {
@@ -112,6 +113,50 @@ describe('reading view repaint', () => {
 
     expect(host.root.querySelector('.at-hl')).toBe(mark);
     expect(document.getSelection()!.toString()).toBe('beta');
+  });
+
+  it('clears the consumed selection after adding a second mark in the same paragraph', () => {
+    const source = 'first middle second';
+    const annotations = { 'host.md': [annotation('first', 'first')] };
+    const host = view('host.md', source, '<p>first middle second</p>');
+    const block = host.root.querySelector('p')!;
+    processSection(block, 'host.md', source, annotations);
+    const range = document.createRange();
+    range.setStart(block.lastChild!, 8);
+    range.setEnd(block.lastChild!, 14);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(range);
+    expect(document.getSelection()!.toString()).toBe('second');
+    const clearSelection = readingSelectionCleanup();
+
+    annotations['host.md'].push({ ...annotation('second', 'second', 13), body: 'Comment' });
+    repaintReadingViews(appFor(host), path => annotations[path] ?? []);
+    clearSelection();
+
+    expect(document.getSelection()!.rangeCount).toBe(0);
+    expect(Array.from(block.querySelectorAll('.at-hl'), el => el.textContent)).toEqual(['first', 'second']);
+    expect(block.querySelector('.at-hl-comment')?.textContent).toBe('second');
+    expect(block.textContent).toBe(source);
+  });
+
+  it('does not clear a different selection made while a save was pending', () => {
+    const host = view('host.md', 'first middle second', '<p>first middle second</p>');
+    const text = host.root.querySelector('p')!.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 13);
+    range.setEnd(text, 19);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(range);
+    const clearSelection = readingSelectionCleanup();
+    const replacement = document.createRange();
+    replacement.setStart(text, 6);
+    replacement.setEnd(text, 12);
+    document.getSelection()!.removeAllRanges();
+    document.getSelection()!.addRange(replacement);
+
+    clearSelection();
+
+    expect(document.getSelection()!.toString()).toBe('middle');
   });
 
   it('keeps nested marks scoped to their file and updates and deletes them there', () => {
