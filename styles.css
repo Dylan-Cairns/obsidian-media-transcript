@@ -1355,3 +1355,62 @@ img.at-flash {
   display: block;
   margin: var(--size-4-2) auto;
 }
+
+/* Library: media rows */
+.mo-lib-media-row {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.mo-lib-kind {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.mo-lib-kind svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.mo-lib-media-row .mo-lib-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mo-lib-file {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mo-lib-media-row .mo-lib-badge:first-of-type {
+  margin-left: var(--size-4-2);
+}
+
+.mo-lib-more-actions {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.mo-lib-collections {
+  margin-bottom: var(--size-4-2);
+}
+
+.mo-lib-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

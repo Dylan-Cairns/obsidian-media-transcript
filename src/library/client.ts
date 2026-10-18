@@ -13,6 +13,14 @@ export interface LibraryFile {
   backup?: Record<string, string>;   // where a backup holds it → since when
 }
 
+/** An entry of the server's index.json: every media file it holds, in every folder. */
+export interface IndexEntry {
+  path: string;          // in the library: <folder>/<path in it>
+  size: number;
+  added?: string;
+  backup?: Record<string, string>;
+}
+
 export interface Job {
   id: number;
   vault: string;
@@ -84,6 +92,33 @@ export class LibraryClient {
   async transcribe(vaultPath: string, force: boolean): Promise<Job | null> {
     const r = await this.call('POST', 'transcribe', JSON.stringify({ vault: this.vault(), path: vaultPath, force }), 'application/json');
     return (r.json as { job: Job | null }).job;
+  }
+
+  /**
+   * Every media file on the server, in every folder: this vault's, and older
+   * collections kept there (recorded streams, podcasts) whose transcripts are
+   * in the vault but whose media never was.
+   */
+  async index(): Promise<IndexEntry[]> {
+    if (!this.configured) throw new LibraryError(0, t('library.noServer'));
+    let r: RequestUrlResponse;
+    try {
+      r = await requestUrl({ url: `${this.server()}/library/index.json`, headers: { 'Cache-Control': 'no-cache' }, throw: false });
+    } catch {
+      throw new LibraryError(0, t('library.unreachable'));
+    }
+    if (r.status !== 200) throw new LibraryError(r.status, `HTTP ${r.status}`);
+    return ((r.json as { files?: IndexEntry[] }).files ?? []).filter(e => !e.path.startsWith('_'));
+  }
+
+  /** The folder this vault's media is kept in on the server. */
+  get folder(): string {
+    return this.vault();
+  }
+
+  /** Where the server serves a file, by its library path. */
+  libraryUrl(path: string): string {
+    return `${this.server()}/library/${path.split('/').map(encodeURIComponent).join('/')}`;
   }
 
   /** Every file in the web archive. */

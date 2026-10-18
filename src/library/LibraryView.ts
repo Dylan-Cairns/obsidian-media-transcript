@@ -1,8 +1,9 @@
 import { App, ItemView, Menu, Modal, Notice, Setting, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
-import type { Job, LibraryFile, TrashItem } from './client';
+import type { TrashItem } from './client';
 import { deleteMedia, renameMedia, restoreMedia } from './actions';
 import { ArchiveList } from './ArchiveList';
+import { MediaList } from './MediaList';
 import { t } from '../i18n';
 import { formatSize } from '../utils/format';
 
@@ -15,20 +16,22 @@ export const VIEW_TYPE_LIBRARY = 'media-one-library';
  * from notes).
  */
 export class LibraryView extends ItemView {
-  private files: LibraryFile[] = [];
-  private trashItems: TrashItem[] = [];
-  private jobsByPath = new Map<string, Job>();
   private filter = '';
-  private error: string | null = null;
   private listEl!: HTMLElement;
   private statusEl!: HTMLElement;
-  private playing: HTMLElement | null = null;
   private tab: 'media' | 'archive' = 'media';
   private tabsEl!: HTMLElement;
+  private readonly media: MediaList;
   private readonly archive: ArchiveList;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: MediaTranscriptPlugin) {
     super(leaf);
+    this.media = new MediaList(plugin, {
+      rerender: () => this.renderList(),
+      rename: vaultPath => this.askRename(vaultPath),
+      delete: vaultPath => this.askDelete(vaultPath),
+      restore: item => this.restore(item),
+    });
     this.archive = new ArchiveList(plugin, {
       confirm: (heading, body, action, onConfirm) => new ConfirmModal(this.app, heading, body, action, onConfirm).open(),
       rerender: () => this.renderList(),
@@ -76,35 +79,12 @@ export class LibraryView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    this.stopPlaying();
+    this.media.stop();
   }
 
   async refresh(): Promise<void> {
-    if (this.tab === 'archive') {
-      await this.archive.refresh();
-      this.renderList();
-      return;
-    }
-    const { library } = this.plugin;
-    if (!library.configured) {
-      this.error = t('library.notConfigured');
-      this.files = [];
-      this.trashItems = [];
-    } else {
-      try {
-        const [files, trash, jobs] = await Promise.all([library.files(), library.trash(), library.jobs()]);
-        this.files = files;
-        this.trashItems = trash;
-        // The latest job of each file says whether it is being transcribed.
-        this.jobsByPath = new Map();
-        for (const j of jobs.jobs.sort((a, b) => a.created - b.created)) {
-          this.jobsByPath.set(j.path.slice(j.path.indexOf('/') + 1), j);
-        }
-        this.error = null;
-      } catch (e) {
-        this.error = (e as Error).message;
-      }
-    }
+    if (this.tab === 'archive') await this.archive.refresh();
+    else await this.media.refresh();
     this.renderList();
   }
 
@@ -113,120 +93,14 @@ export class LibraryView extends ItemView {
     listEl.empty();
     statusEl.empty();
     this.tabsEl.querySelectorAll<HTMLElement>('.mo-lib-tab').forEach(b => b.toggleClass('is-active', b.dataset.tab === this.tab));
-    if (this.tab === 'archive') {
-      this.archive.render(listEl, statusEl, this.filter);
-      return;
-    }
-    const waiting = this.plugin.uploader.pending.length;
-    if (this.error) {
-      statusEl.createSpan({ cls: 'mo-lib-error', text: this.error });
-    } else {
-      const size = this.files.reduce((n, f) => n + f.size, 0);
-      const vars = { count: this.files.length, size: formatSize(size), waiting };
-      statusEl.setText(waiting ? t('library.statusWaiting', vars) : t('library.status', vars));
-    }
-
-    const shown = this.files
-      .filter(f => !this.filter || f.vaultPath.toLowerCase().includes(this.filter))
-      .sort((a, b) => a.vaultPath.localeCompare(b.vaultPath));
-    let folder: string | null = null;
-    for (const f of shown) {
-      const dir = f.vaultPath.includes('/') ? f.vaultPath.slice(0, f.vaultPath.lastIndexOf('/')) : '/';
-      if (dir !== folder) {
-        folder = dir;
-        listEl.createDiv({ cls: 'mo-lib-folder', text: dir });
-      }
-      this.renderRow(listEl, f);
-    }
-    if (!this.error && shown.length === 0) {
-      listEl.createDiv({ cls: 'mo-lib-empty', text: this.filter ? t('library.nothingMatches') : t('library.empty') });
-    }
-
-    if (this.trashItems.length > 0) {
-      const details = listEl.createEl('details', { cls: 'mo-lib-trash' });
-      details.createEl('summary', { text: t('library.trashSummary', { count: this.trashItems.length }) });
-      for (const item of [...this.trashItems].sort((a, b) => b.trashed.localeCompare(a.trashed))) {
-        const row = details.createDiv('mo-lib-row');
-        const main = row.createDiv('mo-lib-main');
-        main.createDiv({ cls: 'mo-lib-name', text: item.path.slice(item.path.indexOf('/') + 1) });
-        main.createDiv({ cls: 'mo-lib-meta', text: t('library.deletedAt', { date: item.trashed.replace('T', ' ') }) });
-        const restore = row.createEl('button', { text: t('library.restore'), cls: 'mo-lib-restore' });
-        restore.addEventListener('click', () => { void this.restore(item); });
-      }
-    }
+    if (this.tab === 'archive') this.archive.render(listEl, statusEl, this.filter);
+    else this.media.render(listEl, statusEl, this.filter);
   }
 
-  private renderRow(parent: HTMLElement, f: LibraryFile): void {
-    const row = parent.createDiv('mo-lib-row');
-    row.dataset.path = f.vaultPath;
-    const main = row.createDiv('mo-lib-main');
-    main.createDiv({ cls: 'mo-lib-name', text: nameOf(f.vaultPath) });
-    const meta = main.createDiv('mo-lib-meta');
-    meta.appendText(`${formatSize(f.size)}${f.added ? ' · ' + f.added.slice(0, 10) : ''}`);
-    if (this.plugin.transcripts.transcriptsFor(nameOf(f.vaultPath)).length > 0) {
-      meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeTranscript') });
-    }
-    if (this.plugin.app.vault.getAbstractFileByPath(f.vaultPath) instanceof TFile) {
-      meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeOnDevice') });
-    }
-    if (!f.backup || Object.keys(f.backup).length === 0) {
-      meta.createSpan({ cls: 'mo-lib-badge mo-lib-nobackup', text: t('library.badgeNoBackup'), attr: { title: t('library.badgeNoBackupTip') } });
-    }
-    const job = this.jobsByPath.get(f.vaultPath);
-    if (job && job.state !== 'done' && job.state !== 'canceled') {
-      const label = job.state === 'queued' ? t('library.jobQueued') : job.state === 'claimed' ? t('library.jobClaimed') : t('library.jobFailed');
-      const badge = meta.createSpan({ cls: `mo-lib-badge mo-lib-job-${job.state}`, text: label });
-      if (job.error) badge.setAttr('title', job.error);
-    }
-    main.addEventListener('click', () => { void this.play(f, row); });
-
-    const actions = row.createDiv('mo-lib-actions');
-    const rename = actions.createEl('button', { cls: 'clickable-icon mo-lib-rename', attr: { 'aria-label': t('library.renameOrMove') } });
-    setIcon(rename, 'pencil');
-    rename.addEventListener('click', () => this.askRename(f));
-    const del = actions.createEl('button', { cls: 'clickable-icon mo-lib-delete', attr: { 'aria-label': t('library.delete') } });
-    setIcon(del, 'trash-2');
-    del.addEventListener('click', () => this.askDelete(f));
-
-    row.addEventListener('contextmenu', evt => {
-      const menu = new Menu();
-      menu.addItem(i => i.setTitle(t('library.menuPlay')).setIcon('play').onClick(() => { void this.play(f, row); }));
-      menu.addItem(i => i.setTitle(t('library.menuRename')).setIcon('pencil').onClick(() => this.askRename(f)));
-      menu.addItem(i => i.setTitle(t('library.menuTranscribe')).setIcon('file-audio').onClick(() => { void this.transcribe(f); }));
-      menu.addItem(i => i.setTitle(t('library.menuCopyEmbed')).setIcon('copy').onClick(() => {
-        void navigator.clipboard.writeText(`![[${nameOf(f.vaultPath)}]]`);
-        new Notice(t('library.copied'));
-      }));
-      menu.addItem(i => i.setTitle(t('library.delete')).setIcon('trash-2').setWarning(true).onClick(() => this.askDelete(f)));
-      menu.showAtMouseEvent(evt);
-    });
-  }
-
-  /** Open its transcript if there is one; else play it right here. */
-  private async play(f: LibraryFile, row: HTMLElement): Promise<void> {
-    const transcript = this.plugin.transcripts.transcriptsFor(nameOf(f.vaultPath))[0];
-    if (transcript) {
-      await this.plugin.openTranscript(transcript);
-      return;
-    }
-    this.stopPlaying();
-    const holder = row.createDiv('mo-lib-player');
-    const audio = holder.createEl('audio', { attr: { controls: '', src: this.plugin.library.url(f.vaultPath) } });
-    this.playing = holder;
-    void audio.play().catch(() => { /* the controls are there to try again */ });
-  }
-
-  private stopPlaying(): void {
-    if (!this.playing) return;
-    this.playing.querySelector('audio')?.pause();
-    this.playing.remove();
-    this.playing = null;
-  }
-
-  askRename(f: LibraryFile): void {
-    new RenameModal(this.app, f.vaultPath, async to => {
+  askRename(vaultPath: string): void {
+    new RenameModal(this.app, vaultPath, async to => {
       try {
-        await renameMedia(this.plugin, f.vaultPath, to);
+        await renameMedia(this.plugin, vaultPath, to);
         new Notice(t('library.renamedTo', { path: to }));
       } catch (e) {
         new Notice(t('library.renameFailed', { error: (e as Error).message }));
@@ -235,28 +109,18 @@ export class LibraryView extends ItemView {
     }).open();
   }
 
-  askDelete(f: LibraryFile): void {
-    new ConfirmModal(this.app, t('library.deleteTitle', { name: nameOf(f.vaultPath) }),
+  askDelete(vaultPath: string): void {
+    new ConfirmModal(this.app, t('library.deleteTitle', { name: nameOf(vaultPath) }),
       t('library.deleteDesc'),
       t('library.delete'), async () => {
         try {
-          await deleteMedia(this.plugin, f.vaultPath);
-          new Notice(t('library.deleted', { name: nameOf(f.vaultPath) }));
+          await deleteMedia(this.plugin, vaultPath);
+          new Notice(t('library.deleted', { name: nameOf(vaultPath) }));
         } catch (e) {
           new Notice(t('library.deleteFailed', { error: (e as Error).message }));
         }
         await this.refresh();
       }).open();
-  }
-
-  private async transcribe(f: LibraryFile): Promise<void> {
-    try {
-      const job = await this.plugin.library.transcribe(f.vaultPath, true);
-      new Notice(job ? t('library.transcribeQueued', { name: nameOf(f.vaultPath) }) : t('library.nothingToTranscribe'));
-    } catch (e) {
-      new Notice(t('library.transcribeFailed', { error: (e as Error).message }));
-    }
-    await this.refresh();
   }
 
   private async restore(item: TrashItem): Promise<void> {

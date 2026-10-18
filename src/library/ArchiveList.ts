@@ -159,11 +159,19 @@ export class ArchiveList {
     const thumb = row.createDiv('mo-lib-thumb');
     if (IMAGE_EXTS.has(ext)) {
       thumb.createEl('img', { attr: { src: this.plugin.library.archiveUrl(f.name), loading: 'lazy', alt: '' } });
+    } else if (VIDEO_EXTS.has(ext)) {
+      // A frame from the start, fetched only when the row comes into view.
+      const video = thumb.createEl('video', { attr: { preload: 'none', muted: '', playsinline: '' } });
+      whenVisible(thumb, () => {
+        video.preload = 'metadata';
+        video.src = `${this.plugin.library.archiveUrl(f.name)}#t=1`;
+      });
     } else {
-      setIcon(thumb, VIDEO_EXTS.has(ext) ? 'film' : 'file');
+      setIcon(thumb, 'file');
     }
     const main = row.createDiv('mo-lib-main');
-    main.createDiv({ cls: 'mo-lib-name', text: ref?.notes[0]?.basename ?? (url ? tail(url) : media) });
+    // Saved before devices said where from, and shown by no note: its hash, shortened.
+    main.createDiv({ cls: 'mo-lib-name', text: ref?.notes[0]?.basename ?? (url ? tail(url) : `${media.slice(0, 8)}….${ext}`) });
     const meta = main.createDiv('mo-lib-meta');
     meta.appendText(`${formatSize(f.size)} · ${f.modified.slice(0, 10)}`);
     const count = ref?.notes.length ?? 0;
@@ -251,4 +259,14 @@ function tail(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** Run `fn` once `el` is (nearly) on screen. */
+function whenVisible(el: HTMLElement, fn: () => void): void {
+  const io = new IntersectionObserver(entries => {
+    if (!entries.some(e => e.isIntersecting)) return;
+    io.disconnect();
+    fn();
+  }, { rootMargin: '200px' });
+  io.observe(el);
 }
