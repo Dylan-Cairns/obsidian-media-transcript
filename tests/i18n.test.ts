@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { _all, setLanguage, t } from '../src/i18n';
+import { _all, obsidianLanguage, setLanguage, t } from '../src/i18n';
 
 const placeholders = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort();
 
@@ -19,5 +19,20 @@ describe('i18n', () => {
     const key = Object.keys(_all.en)[0] as keyof typeof _all.en;
     if (key) expect(t(key)).toBe(_all.en[key]);
     setLanguage('en');
+  });
+
+  it('follows the language Obsidian shows when none was chosen (the system language)', () => {
+    const g = globalThis as { window?: unknown };
+    const store = (lang: string | null) => ({ getItem: (k: string) => (k === 'language' ? lang : null) });
+    try {
+      g.window = { localStorage: store('zh'), document: { documentElement: { lang: 'en' } } };
+      expect(obsidianLanguage()).toBe('zh');
+      g.window = { localStorage: store(null), document: { documentElement: { lang: 'zh' } } };
+      expect(obsidianLanguage()).toBe('zh');
+      g.window = { localStorage: store(null), document: { documentElement: { lang: '' } } };
+      expect(obsidianLanguage()).toBe('en');
+    } finally {
+      delete g.window;
+    }
   });
 });

@@ -20,7 +20,10 @@ const translations: Record<string, Partial<Record<TextKey, string>>> = {
 /** Obsidian keeps its interface language in local storage ("zh", "zh-TW", "de"…; none = English). */
 export function obsidianLanguage(): string {
   try {
-    return (typeof window !== 'undefined' && window.localStorage?.getItem('language')) || 'en';
+    if (typeof window === 'undefined') return 'en';
+    // Chosen in Settings → General. Unset, Obsidian follows the system's
+    // language (as on a phone never switched), which it puts on the page.
+    return window.localStorage?.getItem('language') || window.document?.documentElement?.lang || 'en';
   } catch {
     return 'en';
   }
