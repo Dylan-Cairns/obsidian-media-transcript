@@ -12,6 +12,7 @@ import { t } from "../../i18n";
 // A phone reads the whole file into memory to keep it: keep that to what it can hold.
 const PHONE_MAX_BYTES = 500 * 1024 * 1024;
 const VIDEO_TIMEOUT_MS = 30 * 60_000;
+const RECHECK_MS = 60_000;
 
 type State = "unknown" | "remote" | "downloading" | "archived";
 
@@ -28,6 +29,8 @@ type State = "unknown" | "remote" | "downloading" | "archived";
  */
 export class VideoEmbeds {
 	private states = new Map<string, State>();
+	/** When each video's state was last asked of the servers: asked again after a while (it may be deleted meanwhile). */
+	private checkedAt = new Map<string, number>();
 	/** Videos fetched to play from memory (see playWithoutReferrer), freed on unload. */
 	private objectUrls = new Set<string>();
 	/** The bars on screen, by video URL, to update them all when one is downloaded. */
@@ -154,7 +157,10 @@ export class VideoEmbeds {
 		if (!set) this.bars.set(url, (set = new Set()));
 		set.add(bar);
 		this.paint(bar, url);
-		if (!this.states.has(url)) void this.check(url, sourcePath);
+		const settled = this.states.get(url) === "archived" || this.states.get(url) === "remote";
+		if (!this.states.has(url) || (settled && Date.now() - (this.checkedAt.get(url) ?? 0) > RECHECK_MS)) {
+			void this.check(url, sourcePath);
+		}
 		return bar;
 	}
 
@@ -231,8 +237,11 @@ export class VideoEmbeds {
 	}
 
 	private async check(url: string, sourcePath: string): Promise<void> {
-		this.states.set(url, "unknown");
-		this.setState(url, (await this.isArchived(url, sourcePath)) ? "archived" : "remote");
+		if (!this.states.has(url)) this.states.set(url, "unknown");
+		this.checkedAt.set(url, Date.now());
+		const archived = await this.isArchived(url, sourcePath);
+		if (this.states.get(url) === "downloading") return;
+		this.setState(url, archived ? "archived" : "remote");
 	}
 
 	private async isArchived(url: string, sourcePath: string): Promise<boolean> {
