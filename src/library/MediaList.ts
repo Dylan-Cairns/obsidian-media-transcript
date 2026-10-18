@@ -1,6 +1,7 @@
 import { Menu, Notice, TFile, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import type { IndexEntry, Job, TrashItem } from './client';
+import { DeviceState } from './deviceState';
 import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt, withoutDate } from './mediaInfo';
 import { formatSize } from '../utils/format';
 import { parseSubtitle, type SubtitleSegment } from '../utils/subtitleParser';
@@ -66,9 +67,13 @@ export class MediaList {
   /** Read from each shown transcript once: the media's length and opening words. */
   private details = new Map<string, { duration: number | null; words: string }>();
   /** The row playing inline: its audio, its play button, and the bar under it. */
-  private playing: { row: HTMLElement; audio: HTMLAudioElement; button: HTMLElement; bar: HTMLElement } | null = null;
+  private playing: { path: string; row: HTMLElement; audio: HTMLAudioElement; button: HTMLElement; bar: HTMLElement; caption: HTMLElement | null } | null = null;
 
-  constructor(private readonly plugin: MediaTranscriptPlugin, private readonly host: MediaHost) {}
+  private readonly device: DeviceState;
+
+  constructor(private readonly plugin: MediaTranscriptPlugin, private readonly host: MediaHost) {
+    this.device = new DeviceState(plugin.app);
+  }
 
   private get own(): string {
     return this.plugin.library.folder;
@@ -82,18 +87,30 @@ export class MediaList {
       this.trash = [];
       return;
     }
+    // The index as last fetched, shown at once while the server answers.
+    if (this.items.length === 0) {
+      const cached = this.device.get<IndexEntry[]>('mediaIndex', []);
+      if (cached.length) this.show(cached);
+      this.host.rerender();
+    }
     try {
       const [index, trash, jobs] = await Promise.all([library.index(), library.trash(), library.jobs()]);
       this.trash = trash;
       this.jobs = new Map();
       for (const j of jobs.jobs.sort((a, b) => a.created - b.created)) this.jobs.set(j.path, j);
-      this.items = this.build(index);
-      this.totalSize = index.reduce((n, e) => n + e.size, 0);
+      this.show(index);
+      this.device.set('mediaIndex', index);
       this.error = null;
       this.retried = false;
     } catch (e) {
+      // With a list to show, a failed refresh only says so; without, it is the error.
       this.error = (e as Error).message;
     }
+  }
+
+  private show(index: IndexEntry[]): void {
+    this.items = this.build(index);
+    this.totalSize = index.reduce((n, e) => n + e.size, 0);
   }
 
   private build(index: IndexEntry[]): Item[] {
@@ -159,9 +176,8 @@ export class MediaList {
   }
 
   render(list: HTMLElement, status: HTMLElement, filter: string): void {
-    this.stop();  // its row is about to be redrawn
     if (this.error) {
-      status.createSpan({ cls: 'mo-lib-error', text: this.error });
+      status.createSpan({ cls: 'mo-lib-error', text: this.items.length ? t('library.staleList', { error: this.error }) : this.error });
       const retry = status.createEl('button', { cls: 'mo-lib-retry', text: t('library.retry') });
       const again = () => void this.refresh().then(() => this.host.rerender());
       retry.addEventListener('click', again);
@@ -170,7 +186,7 @@ export class MediaList {
         this.retried = true;
         window.setTimeout(again, 4000);
       }
-      return;
+      if (this.items.length === 0) return;
     }
     const counts = new Map<string, Item[]>();
     for (const it of this.items) counts.set(it.collection, [...(counts.get(it.collection) ?? []), it]);
@@ -180,7 +196,7 @@ export class MediaList {
     const inView = this.collection === '*' ? this.items : counts.get(current) ?? [];
     const size = (items: Item[]) => formatSize(items.reduce((n, i) => n + i.size, 0));
     const waiting = this.plugin.uploader.pending.length;
-    status.setText(t(waiting ? 'library.mediaStatusWaiting' : 'library.mediaStatus', {
+    if (!this.error) status.setText(t(waiting ? 'library.mediaStatusWaiting' : 'library.mediaStatus', {
       count: inView.length, size: size(inView), total: formatSize(this.totalSize), waiting,
     }));
 
@@ -209,6 +225,25 @@ export class MediaList {
       list.createDiv({ cls: 'mo-lib-empty', text: filter ? t('library.nothingMatches') : t('library.empty') });
     }
     if (current === this.own && this.collection !== '*') this.renderTrash(list);
+    this.keepPlaying(list);
+  }
+
+  /** The list was redrawn (a search typed, say): carry on playing in the new row, or stop if it's gone. */
+  private keepPlaying(list: HTMLElement): void {
+    const playing = this.playing;
+    if (!playing) return;
+    const row = Array.from(list.querySelectorAll<HTMLElement>('.mo-lib-media-row')).find(r => r.dataset.path === playing.path);
+    const button = row?.querySelector<HTMLElement>('.mo-lib-play');
+    if (!row || !button) {
+      this.stop();
+      return;
+    }
+    playing.row = row;
+    playing.button = button;
+    row.addClass('is-playing');
+    setIcon(button, playing.audio.paused ? 'play' : 'pause');
+    if (playing.caption) row.appendChild(playing.caption);
+    row.appendChild(playing.bar);
   }
 
   private renderCollections(list: HTMLElement, counts: Map<string, Item[]>, current: string): void {
@@ -255,7 +290,8 @@ export class MediaList {
       // Then where it comes from: the note (a daily note's name is the date
       // already shown), and the file, unless its name is only a timestamp.
       const note = it.notes[0] && !isDatedName(it.notes[0].basename) ? it.notes[0].basename : null;
-      const file = generic || it.name.startsWith(name) ? null : it.name;
+      // The file's own name always, to know it by in a folder or a link.
+      const file = name === base ? null : it.name;
       const parts = [note, file].filter((x): x is string => !!x && x !== name);
       context.setText(parts.join(' · '));
       context.toggle(parts.length > 0);
@@ -392,25 +428,29 @@ export class MediaList {
     });
     audio.addEventListener('timeupdate', paint);
     audio.addEventListener('loadedmetadata', paint);
-    audio.addEventListener('play', () => { setIcon(button, 'pause'); row.addClass('is-playing'); });
-    audio.addEventListener('pause', () => { setIcon(button, 'play'); });
+    audio.addEventListener('play', () => {
+      if (!this.playing) return;
+      setIcon(this.playing.button, 'pause');
+      this.playing.row.addClass('is-playing');
+    });
+    audio.addEventListener('pause', () => { if (this.playing) setIcon(this.playing.button, 'play'); });
     audio.addEventListener('ended', () => this.stop());
-    this.playing = { row, audio, button, bar };
+    this.playing = { path: it.path, row, audio, button, bar, caption };
     // It grows by a line or two: keep all of it in sight.
     window.setTimeout(() => row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
-    void audio.play().catch(() => { setIcon(button, 'play'); });
+    void audio.play().catch(() => { if (this.playing) setIcon(this.playing.button, 'play'); });
   }
 
   stop(): void {
     if (!this.playing) return;
-    const { audio, button, bar, row } = this.playing;
+    const { audio, button, bar, row, caption } = this.playing;
+    this.playing = null;
     audio.pause();
     audio.removeAttribute('src');
     bar.remove();
-    row.querySelector('.mo-lib-caption')?.remove();
+    caption?.remove();
     setIcon(button, 'play');
     row.removeClass('is-playing');
-    this.playing = null;
   }
 
   private async transcribe(vaultPath: string, name: string): Promise<void> {

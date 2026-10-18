@@ -1,6 +1,8 @@
 import { Menu, Notice, TFile, setIcon } from 'obsidian';
 import type MediaTranscriptPlugin from '../main';
 import type { ArchiveFile } from './client';
+import { DeviceState } from './deviceState';
+import { ArchivePreview } from './ArchivePreview';
 import { archiveName } from '../modules/archive/resolver';
 import { formatSize } from '../utils/format';
 import { t } from '../i18n';
@@ -38,8 +40,11 @@ export class ArchiveList {
   private error: string | null = null;
   private scanning = false;
   loaded = false;
+  private readonly device: DeviceState;
 
-  constructor(private readonly plugin: MediaTranscriptPlugin, private readonly host: ArchiveHost) {}
+  constructor(private readonly plugin: MediaTranscriptPlugin, private readonly host: ArchiveHost) {
+    this.device = new DeviceState(plugin.app);
+  }
 
   async refresh(): Promise<void> {
     const { library } = this.plugin;
@@ -48,12 +53,24 @@ export class ArchiveList {
       this.files = [];
       return;
     }
+    // What was listed last time, at once; then the server's answer, then
+    // which notes show each (reading every note takes a few seconds).
+    if (this.files.length === 0) {
+      this.files = this.device.get<ArchiveFile[]>('archiveList', []);
+      if (this.files.length) this.loaded = true;
+    }
     this.scanning = true;
     this.host.rerender();
     try {
-      const [files, refs] = await Promise.all([library.archive(), this.scanNotes()]);
-      this.files = files;
-      this.refs = refs;
+      const listed = library.archive().then(files => {
+        this.files = files;
+        this.error = null;
+        this.loaded = true;
+        this.device.set('archiveList', files);
+        this.host.rerender();
+      });
+      const scanned = this.scanNotes().then(refs => { this.refs = refs; });
+      await Promise.all([listed, scanned]);
       this.error = null;
     } catch (e) {
       this.error = (e as Error).message;
@@ -133,7 +150,8 @@ export class ArchiveList {
         this.host.rerender();
       });
     }
-    const sort = bar.createEl('select', { cls: 'dropdown mo-lib-sort' });
+    // In the same scrolling row as the filters, so a narrow phone cuts nothing off.
+    const sort = group.createEl('select', { cls: 'dropdown mo-lib-sort' });
     sort.createEl('option', { value: 'new', text: t('library.archiveSortNew') });
     sort.createEl('option', { value: 'size', text: t('library.archiveSortSize') });
     sort.value = this.sort;
@@ -153,6 +171,12 @@ export class ArchiveList {
   }
 
   private renderGroups(list: HTMLElement, files: ArchiveFile[]): void {
+    if (this.scanning && this.refs.size === 0) {
+      // Which note each is in isn't known yet: one wall, no headings that would be wrong.
+      const grid = list.createDiv('mo-lib-grid');
+      for (const f of files) this.renderTile(grid, f);
+      return;
+    }
     const groups = new Map<string, ArchiveFile[]>();
     for (const f of files) {
       const key = this.refs.get(f.name)?.notes[0]?.path ?? '';
@@ -190,11 +214,7 @@ export class ArchiveList {
     } else {
       setIcon(tile, 'file');
     }
-    tile.addEventListener('click', () => {
-      if (transcript) void this.plugin.openTranscript(transcript);
-      else if (ref?.notes[0]) void this.plugin.app.workspace.getLeaf(false).openFile(ref.notes[0]);
-      else window.open(this.plugin.library.archiveUrl(f.name));
-    });
+    tile.addEventListener('click', () => this.preview(f));
     tile.addEventListener('contextmenu', evt => {
       evt.preventDefault();
       this.menu(evt, f, ref, url, transcript);
@@ -232,12 +252,34 @@ export class ArchiveList {
     else if (!this.scanning) meta.createSpan({ cls: 'mo-lib-badge mo-lib-nobackup', text: t('library.archiveUnused') });
     if (transcript) meta.createSpan({ cls: 'mo-lib-badge', text: t('library.badgeTranscript') });
 
-    main.addEventListener('click', () => {
-      if (transcript) void this.plugin.openTranscript(transcript);
-      else if (ref?.notes[0]) void this.plugin.app.workspace.getLeaf(false).openFile(ref.notes[0]);
-      else window.open(this.plugin.library.archiveUrl(f.name));
-    });
+    main.addEventListener('click', () => this.preview(f));
     row.addEventListener('contextmenu', evt => this.menu(evt, f, ref, url, transcript));
+  }
+
+  /** Look at it here, the list kept underneath; what to do next is in the preview. */
+  private preview(f: ArchiveFile): void {
+    const ref = this.refs.get(f.name);
+    const url = ref?.url ?? f.url;
+    const ext = extOf(f.name);
+    const video = VIDEO_EXTS.has(ext);
+    const transcript = video ? this.plugin.transcripts.transcriptsFor(f.name.slice(3)).find(x => x.extension === 'json') : undefined;
+    new ArchivePreview(this.plugin.app, {
+      kind: IMAGE_EXTS.has(ext) ? 'image' : video ? 'video' : 'other',
+      src: this.plugin.library.archiveUrl(f.name),
+      title: ref?.notes[0]?.basename ?? (url ? tail(url) : `${f.name.slice(3, 11)}….${ext}`),
+      fileName: url ? tail(url) : f.name.slice(3),
+      size: f.size,
+      modified: f.modified,
+      url,
+      notes: ref?.notes ?? [],
+      transcript,
+      canTranscribe: video && !!url && this.plugin.library.configured,
+    }, {
+      openNote: note => { void this.plugin.app.workspace.getLeaf(false).openFile(note); },
+      openTranscript: file => { void this.plugin.openTranscript(file); },
+      transcribe: () => { if (url) void this.transcribe(f, url, ref); },
+      delete: () => this.askDelete([f], false),
+    }).open();
   }
 
   private menu(evt: MouseEvent, f: ArchiveFile, ref: Ref | undefined, url: string | undefined, transcript: TFile | undefined): void {

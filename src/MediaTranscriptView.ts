@@ -440,6 +440,13 @@ export class MediaTranscriptView extends FileView {
       attr: { 'aria-label': t('core.linkMediaAria') },
     });
     link.addEventListener('click', () => { void this.plugin.linkMedia(file); });
+    // A server that didn't answer (asleep, a phone's VPN still coming back)
+    // may well answer now.
+    const retry = container.createEl('button', { cls: 'mt-btn', text: t('core.retryFindMedia') });
+    retry.addEventListener('click', () => {
+      this.plugin.mediaLocator.invalidate();
+      void this.reload();
+    });
   }
 
   private buildSpeedControl(container: HTMLElement) {
