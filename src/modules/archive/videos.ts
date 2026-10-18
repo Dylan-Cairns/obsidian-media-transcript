@@ -28,6 +28,8 @@ type State = "unknown" | "remote" | "downloading" | "archived";
  */
 export class VideoEmbeds {
 	private states = new Map<string, State>();
+	/** Videos fetched to play from memory (see playWithoutReferrer), freed on unload. */
+	private objectUrls = new Set<string>();
 	/** The bars on screen, by video URL, to update them all when one is downloaded. */
 	private bars = new Map<string, Set<HTMLElement>>();
 
@@ -103,11 +105,42 @@ export class VideoEmbeds {
 			box.dataset.note = sourcePath;
 			const video = box.createEl("video", { attr: { controls: "", preload: "metadata", playsinline: "", referrerpolicy: "no-referrer", src: url } });
 			video.dataset.moVideo = "1";
+			video.addEventListener("error", () => void this.playWithoutReferrer(video, url));
 			box.appendChild(this.bar(url, sourcePath));
 			target.parentElement?.insertBefore(box, target);
 			if (inEditor || target !== el) target.addClass("mo-video-replaced");
 			else el.remove();
 		}
+	}
+
+	/**
+	 * Some hosts (video.twimg.com) refuse a video whose request names the page
+	 * it is on, and a <video> can't be told not to. On a phone Obsidian's page
+	 * is http://localhost, which they refuse; the desktop app's isn't. So when
+	 * the original link fails, fetch it without saying where from and play it
+	 * from memory: up to what a phone can hold.
+	 */
+	private async playWithoutReferrer(video: HTMLVideoElement, url: string): Promise<void> {
+		if (video.dataset.moRefetched || video.getAttribute("src") !== url) return;
+		video.dataset.moRefetched = "1";
+		try {
+			const head = await fetch(url, { method: "HEAD", referrerPolicy: "no-referrer" });
+			const size = Number(head.headers.get("content-length"));
+			if (!head.ok || (Number.isFinite(size) && size > PHONE_MAX_BYTES)) return;
+			const blob = await (await fetch(url, { referrerPolicy: "no-referrer" })).blob();
+			if (!video.isConnected) return;
+			const objectUrl = URL.createObjectURL(blob);
+			this.objectUrls.add(objectUrl);
+			video.setAttribute("src", objectUrl);
+		} catch (e) {
+			console.warn(`[media-one] ${url} can't be played:`, e);
+		}
+	}
+
+	/** Free the videos fetched into memory. */
+	dispose(): void {
+		for (const u of this.objectUrls) URL.revokeObjectURL(u);
+		this.objectUrls.clear();
 	}
 
 	private hasPlayer(root: HTMLElement, url: string): boolean {
