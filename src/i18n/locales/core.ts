@@ -119,6 +119,8 @@ const en = {
   'core.settingUploadNew': 'Upload new media to the server',
   'core.originNotes': 'In notes:',
   'core.originNone': 'no note shows it now',
+  'core.settingServerVault': 'Vault name on the server',
+  'core.settingServerVaultDesc': "This vault's folder in the server's library. Empty: the vault's name here ({name}). Set it when a device names its copy of the vault otherwise, so all of them use one folder.",
   'core.settingArchiveTranscripts': 'Transcripts of archived videos',
   'core.settingArchiveTranscriptsDesc': 'Folder for the transcripts of web videos kept in the archive (they have no file in the vault to sit beside). Each is named after the note it was asked from.',
   'core.settingUploadNewDesc': 'Recordings and videos added to the vault are uploaded to the server right away (checked by sha256), ' +
@@ -247,6 +249,8 @@ const zh: Partial<Record<keyof typeof en, string>> = {
   'core.settingUploadNew': '上传新媒体到服务器',
   'core.originNotes': '出自笔记：',
   'core.originNone': '目前没有笔记引用它',
+  'core.settingServerVault': '服务器上的库名',
+  'core.settingServerVaultDesc': '这个库在服务器媒体库里的文件夹名。留空则用本设备上的库名（{name}）。如果某台设备上这个库的名字不一样（比如手机上叫别的名字），就填上同一个名字，让所有设备用同一个文件夹。',
   'core.settingArchiveTranscripts': '归档视频的转录稿',
   'core.settingArchiveTranscriptsDesc': '存放归档网页视频转录稿的文件夹（这些视频不在库里，转录稿没有地方挨着放）。转录稿以发起转文字的笔记命名。',
   'core.settingUploadNewDesc': '添加到库中的录音和视频会立即上传到服务器（按 sha256 校验），' +

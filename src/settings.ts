@@ -19,6 +19,10 @@ export interface MediaTranscriptSettings {
   // ── Media One server ─────────────────────────────────────────────────────
   // Its address; the modules' own lists hold what it stands for.
   serverUrl: string;
+  // This vault's folder on the server. Empty: the vault's name, which may
+  // differ between devices (a phone's copy named otherwise), so set it to keep
+  // every device on one folder. Synced with the settings.
+  serverVault: string;
   // Upload media added to the vault to the server at once. (What is waiting
   // to upload is this device's own, kept in DeviceState, not here.)
   uploadNewMedia: boolean;
@@ -56,6 +60,7 @@ export interface MediaTranscriptSettings {
 
 export const DEFAULT_SETTINGS: MediaTranscriptSettings = {
   serverUrl: '',
+  serverVault: '',
   uploadNewMedia: false,
   archiveTranscriptFolder: 'Transcripts',
   subtitleDirectory: '',
@@ -246,6 +251,17 @@ export class MediaTranscriptSettingTab extends PluginSettingTab {
             ? t('core.serverSet', { url: this.plugin.settings.serverUrl })
             : t('core.serverRemoved'));
           this.display();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName(t('core.settingServerVault'))
+      .setDesc(t('core.settingServerVaultDesc', { name: this.app.vault.getName() }))
+      .addText(text =>
+        text.setPlaceholder(this.app.vault.getName()).setValue(this.plugin.settings.serverVault).onChange(async v => {
+          this.plugin.settings.serverVault = v.trim();
+          await this.plugin.saveSettings();
+          this.plugin.mediaLocator.invalidate();
         }),
       );
     new Setting(containerEl)

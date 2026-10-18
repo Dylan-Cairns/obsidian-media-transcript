@@ -63,7 +63,7 @@ export default class MediaTranscriptPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.modules = new Modules(this, this.moduleState, () => this.saveSettings());
-    this.library = new LibraryClient(() => this.settings.serverUrl, () => this.app.vault.getName());
+    this.library = new LibraryClient(() => this.settings.serverUrl, () => this.settings.serverVault || this.app.vault.getName());
     this.uploader = new Uploader(this);
     this.uploader.adopt(this.legacyPending);
     this.uploader.start();
