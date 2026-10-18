@@ -2,6 +2,7 @@ import { App, ItemView, Menu, Modal, Notice, Setting, TFile, WorkspaceLeaf, setI
 import type MediaTranscriptPlugin from '../main';
 import type { Job, LibraryFile, TrashItem } from './client';
 import { deleteMedia, renameMedia, restoreMedia } from './actions';
+import { ArchiveList } from './ArchiveList';
 import { t } from '../i18n';
 import { formatSize } from '../utils/format';
 
@@ -10,7 +11,8 @@ export const VIEW_TYPE_LIBRARY = 'media-one-library';
 /**
  * The library on the Media One server, as a folder: play, rename, move and
  * delete media that may no longer be on this device, and restore it from the
- * server's trash.
+ * server's trash. A second tab lists the web archive (images and videos saved
+ * from notes).
  */
 export class LibraryView extends ItemView {
   private files: LibraryFile[] = [];
@@ -21,9 +23,16 @@ export class LibraryView extends ItemView {
   private listEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private playing: HTMLElement | null = null;
+  private tab: 'media' | 'archive' = 'media';
+  private tabsEl!: HTMLElement;
+  private readonly archive: ArchiveList;
 
   constructor(leaf: WorkspaceLeaf, private readonly plugin: MediaTranscriptPlugin) {
     super(leaf);
+    this.archive = new ArchiveList(plugin, {
+      confirm: (heading, body, action, onConfirm) => new ConfirmModal(this.app, heading, body, action, onConfirm).open(),
+      rerender: () => this.renderList(),
+    });
   }
 
   getViewType(): string {
@@ -51,6 +60,16 @@ export class LibraryView extends ItemView {
     const refresh = bar.createEl('button', { cls: 'clickable-icon mo-lib-refresh', attr: { 'aria-label': t('library.refresh') } });
     setIcon(refresh, 'refresh-cw');
     refresh.addEventListener('click', () => { void this.refresh(); });
+    this.tabsEl = root.createDiv('mo-lib-tabs');
+    for (const [tab, label] of [['media', t('library.tabMedia')], ['archive', t('library.tabArchive')]] as const) {
+      const b = this.tabsEl.createEl('button', { text: label, cls: 'mo-lib-tab' });
+      b.dataset.tab = tab;
+      b.addEventListener('click', () => {
+        this.tab = tab;
+        if (tab === 'archive' && !this.archive.loaded) void this.archive.refresh().then(() => this.renderList());
+        this.renderList();
+      });
+    }
     this.statusEl = root.createDiv('mo-lib-status');
     this.listEl = root.createDiv('mo-lib-list');
     await this.refresh();
@@ -61,6 +80,11 @@ export class LibraryView extends ItemView {
   }
 
   async refresh(): Promise<void> {
+    if (this.tab === 'archive') {
+      await this.archive.refresh();
+      this.renderList();
+      return;
+    }
     const { library } = this.plugin;
     if (!library.configured) {
       this.error = t('library.notConfigured');
@@ -88,6 +112,11 @@ export class LibraryView extends ItemView {
     const { listEl, statusEl } = this;
     listEl.empty();
     statusEl.empty();
+    this.tabsEl.querySelectorAll<HTMLElement>('.mo-lib-tab').forEach(b => b.toggleClass('is-active', b.dataset.tab === this.tab));
+    if (this.tab === 'archive') {
+      this.archive.render(listEl, statusEl, this.filter);
+      return;
+    }
     const waiting = this.plugin.uploader.pending.length;
     if (this.error) {
       statusEl.createSpan({ cls: 'mo-lib-error', text: this.error });

@@ -1290,3 +1290,68 @@ img.at-flash {
   flex-wrap: wrap;
   gap: var(--size-4-2);
 }
+
+/* Library: tabs, and the archive list */
+.mo-lib-tabs {
+  display: flex;
+  gap: var(--size-2-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.mo-lib-tab.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.mo-lib-archive-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.mo-lib-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-1);
+}
+
+.mo-lib-segments button {
+  font-size: var(--font-ui-smaller);
+}
+
+.mo-lib-segments button.is-active {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
+
+.mo-lib-archive-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.mo-lib-thumb {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+
+.mo-lib-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mo-lib-more {
+  display: block;
+  margin: var(--size-4-2) auto;
+}

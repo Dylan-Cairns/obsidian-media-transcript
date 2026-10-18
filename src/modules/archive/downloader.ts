@@ -49,7 +49,7 @@ export async function download(
 		const archived = await servers.fetch(url);
 		if (archived) {
 			await writeFile(kept, vault, settings, destPath, archived);
-			await servers.store(destPath, archived);
+			await servers.store(destPath, archived, "kept", url);
 			return "downloaded";
 		}
 	}
@@ -73,7 +73,7 @@ export async function download(
 
 			if (response.status === 200) {
 				if (kept) await writeFile(kept, vault, settings, destPath, response.arrayBuffer);
-				const uploaded = await servers.store(destPath, response.arrayBuffer, kept ? "kept" : dest ? "outbox" : "none");
+				const uploaded = await servers.store(destPath, response.arrayBuffer, kept ? "kept" : dest ? "outbox" : "none", url);
 				// Kept nowhere (no local archive, no server up): leave it for the next scan.
 				if (!dest && uploaded === 0) return "failed-transient";
 				return "downloaded";

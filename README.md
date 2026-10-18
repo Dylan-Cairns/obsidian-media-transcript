@@ -58,8 +58,17 @@ library shows what is waiting or being transcribed; *Transcribe again* in a file
 new one. A transcript already in the vault is never overwritten. On a phone, a new transcript is
 left for half an hour to a computer that may be writing it too.
 
+**Archive tab.** The second tab lists the web archive on the server (images and videos saved
+from notes): size, date, and the notes in this vault that show each one, found by scanning them
+for the links the files came from. Filter by videos, images or *unused here*, sort by date or
+size; click to open the note (or a video's transcript). A file's menu opens its notes, the
+archived copy or the original link, transcribes a video, or deletes the copy: it goes to the
+server's archive trash for 30 days and notes show the original link again. The archive is shared
+by every vault on the server, so *unused here* only means no note in this vault shows it.
+
 The server needs the library API (`/api/files`, `/api/upload`, `/api/rename`, `/api/delete`,
-`/api/restore`, `/api/trash`); a plain file server only offers playback.
+`/api/restore`, `/api/trash`, and `/api/archive` for the archive tab); a plain file server only
+offers playback.
 
 ## Coming from the separate plugins
 
@@ -375,9 +384,26 @@ The plugin archives in three ways:
 | Archive directory name *(sibling)* | `_archive` | Subfolder name (sibling to each `.md`) that holds cached files. |
 | Central archive path *(central)* | `_archive` | Folder that holds all cached files, bucketed by hash prefix: vault-relative, or an absolute / `~/` path outside the vault. Migrate and reconcile work only inside the vault. |
 | Sources | Local archive | Ordered list of where copies are read from: the local archive and WebDAV servers (e.g. `https://host.ts.net/dav/archive`, readable and writable). Each server is checked once, then every 5 min (30 s while unreachable); one that's down is skipped. The local archive always stays in the list. |
+| Keep a copy on this device | on | Shown with a server in the sources. Off: new downloads are kept on the servers only and take no space on the device; one a server can't take right away waits in the local archive until it is uploaded. Copies already in the local archive are still shown. |
 | Waiting to upload | — | Shown when files couldn't reach a server yet; they're retried when it answers and every 10 min, or with **Upload now**. |
 | Auto-archive on file modify | on | If off, only the manual scan command triggers downloads. |
 | Included paths | (empty = whole vault) | Newline-separated vault paths to operate on. Example: `raw/wechat`. |
+
+### Videos
+
+A video linked from a note (`![](https://video.twimg.com/…/clip.mp4)`, or any link to an `.mp4`,
+`.webm`, `.mov` or `.m4v` file) is shown as a player, in Reading view and Live Preview, instead of
+the broken image Obsidian shows. Videos are large, so they are never archived on a scan: a bar
+under each player has **Download to archive**, and the command *Download the videos in this note
+to the archive* takes them all. The device that asks downloads the video and uploads it to the
+servers; on a phone, videos over 500 MB are left to a computer. The note is unchanged, and once
+archived the player plays the server's copy.
+
+With a Media One server, an archived video can be transcribed: **Transcribe** on its bar queues
+it on the server, and the transcript comes to the *Transcripts of archived videos* folder
+(`Transcripts` by default), named after the note it was asked from. The bar then opens it; the
+transcript view plays the archived copy and lists the notes that show the video. A video with no
+sound says so instead.
 
 ### Domain policies
 
@@ -387,9 +413,10 @@ Built-in rules in `policies.ts`:
 |---|---|---|
 | `mmbiz.qpic.cn`, `res.wx.qq.com`, `mmbiz.qlogo.cn` | archive | WeChat — requires `Referer: https://mp.weixin.qq.com/` |
 | `pbs.twimg.com` | archive | Twitter / X images |
-| `video.twimg.com` | **skip** | Twitter videos are large and the CDN is long-term stable |
+| `video.twimg.com` | when asked | Twitter / X videos: large, archived from the player's bar |
 | `youtube.com`, `youtu.be`, `vimeo.com` | skip | stream-only |
-| (anything else) | archive only if URL has a media extension (`.jpg`/`.png`/`.mp4`/…) | prevents accidentally fetching HTML page URLs |
+| (a video file: `.mp4`/`.webm`/`.mov`/`.m4v`) | when asked | as above |
+| (anything else) | archive only if URL has a media extension (`.jpg`/`.png`/`.mp3`/…) | prevents accidentally fetching HTML page URLs |
 
 ### Failure handling
 

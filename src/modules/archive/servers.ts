@@ -144,12 +144,12 @@ export class ArchiveServers {
 	 * it is uploaded there. With "none" and no server holding it either, there'd
 	 * be no copy to upload later, so nothing is queued and the next scan tries again.
 	 */
-	async store(localPath: string, buf: ArrayBuffer, local: LocalCopy = "kept"): Promise<number> {
+	async store(localPath: string, buf: ArrayBuffer, local: LocalCopy = "kept", url?: string): Promise<number> {
 		const name = nameOf(localPath);
 		let stored = 0;
 		const missed: string[] = [];
 		for (const [base, up] of await this.check()) {
-			if (up && (await this.has(base, name) || await this.upload(base, name, buf))) stored++;
+			if (up && (await this.has(base, name) || await this.upload(base, name, buf, url))) stored++;
 			else missed.push(base);
 		}
 		if (missed.length === 0 || (local === "none" && stored === 0)) return stored;
@@ -218,8 +218,10 @@ export class ArchiveServers {
 		return (await request({ url: `${base}/${name}`, method: "HEAD" }))?.status === 200;
 	}
 
-	private async upload(base: string, name: string, body: ArrayBuffer): Promise<boolean> {
-		const put = () => request({ url: `${base}/${name}`, method: "PUT", body, contentType: "application/octet-stream" });
+	/** PUT a file; `url`, where it was saved from, lets a Media One server list it by its source. */
+	private async upload(base: string, name: string, body: ArrayBuffer, url?: string): Promise<boolean> {
+		const headers: Record<string, string> = url ? { "X-Source-Url": encodeURIComponent(url) } : {};
+		const put = () => request({ url: `${base}/${name}`, method: "PUT", body, contentType: "application/octet-stream", headers });
 		let r = await put();
 		if (r?.status === 409) {
 			// WebDAV won't create the bucket folder on its own.

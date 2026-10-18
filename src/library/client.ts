@@ -29,6 +29,14 @@ export interface Job {
   changed: number;
 }
 
+/** A file in the web archive on the server. */
+export interface ArchiveFile {
+  name: string;          // <bucket>/<sha1>.<ext>
+  size: number;
+  modified: string;
+  url?: string;          // where it was saved from, when the device that saved it said
+}
+
 export interface TrashItem {
   id: string;
   path: string;
@@ -76,6 +84,23 @@ export class LibraryClient {
   async transcribe(vaultPath: string, force: boolean): Promise<Job | null> {
     const r = await this.call('POST', 'transcribe', JSON.stringify({ vault: this.vault(), path: vaultPath, force }), 'application/json');
     return (r.json as { job: Job | null }).job;
+  }
+
+  /** Every file in the web archive. */
+  async archive(): Promise<ArchiveFile[]> {
+    const r = await this.call('GET', 'archive');
+    return (r.json as { files: ArchiveFile[] }).files;
+  }
+
+  /** Move archive files to the server's archive trash; returns the ones moved. */
+  async archiveDelete(names: string[]): Promise<string[]> {
+    const r = await this.call('POST', 'archive/delete', JSON.stringify({ names }), 'application/json');
+    return (r.json as { deleted: string[] }).deleted;
+  }
+
+  /** Where the server serves an archive file. */
+  archiveUrl(name: string): string {
+    return `${this.server()}/archive/${name}`;
   }
 
   /** Transcribe a video in the web archive (`name`: <bucket>/<sha1>.<ext>); its transcripts come to this vault. */
