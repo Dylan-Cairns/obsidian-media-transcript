@@ -157,3 +157,75 @@ describe('a mark that does not belong to the note', () => {
     expect(annotation.anchor.kind).toBe('transcript');
   });
 });
+
+describe('AnnotationStore.reload: a sidecar changed by someone else', () => {
+  // Marks made on another device arrive as an edited sidecar through Sync.
+  // They used to stay invisible until Obsidian restarted: the cache was never
+  // told, so the open note kept painting the old list.
+  it('shows marks another device added', async () => {
+    const files = new Map([['a.md.anno.json', sidecar('a.md', 'one')]]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    await store.get('a.md');
+    const notified = vi.fn();
+    store.onChange(notified);
+
+    files.set('a.md.anno.json', sidecar('a.md', 'one', 'two'));
+    await store.reload('a.md.anno.json');
+
+    expect(store.peek('a.md').map(a => a.id)).toEqual(['one', 'two']);
+    expect(notified).toHaveBeenCalledWith('a.md');
+  });
+
+  it('forgets marks when the sidecar is deleted elsewhere', async () => {
+    const files = new Map([['a.md.anno.json', sidecar('a.md', 'one')]]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    await store.get('a.md');
+
+    files.delete('a.md.anno.json');
+    await store.reload('a.md.anno.json');
+
+    expect(store.peek('a.md')).toEqual([]);
+  });
+
+  it('leaves its own writes alone', async () => {
+    const files = new Map([['a.md', 'abc def'], ['a.md.anno.json', sidecar('a.md', 'one')]]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    await store.get('a.md');
+    await store.remove('a.md', 'one').catch(() => {});
+    const read = vi.spyOn(app.vault, 'read');
+    const notified = vi.fn();
+    store.onChange(notified);
+
+    await store.reload('a.md.anno.json');
+
+    expect(notified).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalledWith(expect.objectContaining({ path: 'a.md' }));
+  });
+
+  it('leaves its own edits alone too', async () => {
+    const files = new Map([['a.md', 'abc def'], ['a.md.anno.json', sidecar('a.md', 'one', 'two')]]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    await store.get('a.md');
+    await store.markAgain('a.md', 'one');
+    const notified = vi.fn();
+    store.onChange(notified);
+
+    await store.reload('a.md.anno.json');
+
+    expect(notified).not.toHaveBeenCalled();
+    expect(store.peek('a.md').find(a => a.id === 'one')?.hits).toHaveLength(2);
+  });
+
+  it('ignores paths that are not sidecars', async () => {
+    const app = makeApp(new Map());
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    const notified = vi.fn();
+    store.onChange(notified);
+    await store.reload('a.md');
+    expect(notified).not.toHaveBeenCalled();
+  });
+});

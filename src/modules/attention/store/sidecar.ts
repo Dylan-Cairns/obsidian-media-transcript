@@ -33,18 +33,20 @@ export async function loadSidecar(
 
 /**
  * Write the sidecar. An empty annotation list deletes it instead of leaving a
- * husk behind, so un-annotating a file leaves no trace.
+ * husk behind, so un-annotating a file leaves no trace. Returns what was
+ * written (null when deleted).
  */
-export async function saveSidecar(app: App, data: AnnotationFile): Promise<void> {
+export async function saveSidecar(app: App, data: AnnotationFile): Promise<string | null> {
   const path = sidecarPathFor(data.target);
   const existing = app.vault.getAbstractFileByPath(path);
 
   if (data.annotations.length === 0) {
     if (existing instanceof TFile) await app.fileManager.trashFile(existing);
-    return;
+    return null;
   }
 
   const body = JSON.stringify(data, null, 2);
   if (existing instanceof TFile) await app.vault.modify(existing, body);
   else await app.vault.create(path, body);
+  return body;
 }

@@ -104,6 +104,17 @@ export default class AttentionPlugin extends ModulePlugin {
       void this.handleDelete(file);
     }));
 
+    // Marks made on another device arrive as an edited sidecar (Sync): show
+    // them. After the vault is loaded, so its first listing isn't each "new".
+    this.app.workspace.onLayoutReady(() => {
+      const changed = (file: TAbstractFile) => {
+        if (file instanceof TFile && isSidecarPath(file.path)) void this.store.reload(file.path);
+      };
+      this.registerEvent(this.app.vault.on('create', changed));
+      this.registerEvent(this.app.vault.on('modify', changed));
+      this.registerEvent(this.app.vault.on('delete', changed));
+    });
+
     this.addSettingTab(new AttentionSettingTab(this.app, this));
   }
 

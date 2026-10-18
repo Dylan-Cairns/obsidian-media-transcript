@@ -1,6 +1,6 @@
 import { App, TFile } from 'obsidian';
 import { Annotation, AnnotationFile, Anchor, newId, sameSpot } from '../model';
-import { loadSidecar, saveSidecar } from './sidecar';
+import { loadSidecar, saveSidecar, sidecarPathFor, targetPathFor } from './sidecar';
 import { AttentionIndex } from './attentionIndex';
 import { repairAnchor } from '../anchor/repairAnchors';
 
@@ -30,6 +30,8 @@ export class AnnotationStore {
   private listeners: Listener[] = [];
   /** Paths with a warm already in flight, so a miss can't spawn a stampede. */
   private warming = new Set<string>();
+  /** What this store last wrote to each sidecar (null: deleted it), to tell its own writes from others'. */
+  private written = new Map<string, string | null>();
 
   constructor(private app: App, private index: AttentionIndex) {}
 
@@ -43,8 +45,45 @@ export class AnnotationStore {
     // Persisted straight away rather than waiting for the next edit: a repair
     // that only lives in memory has to be redone on every load, and the file
     // on disk keeps showing the broken quote to anything else that reads it.
-    if (loaded.changed) await saveSidecar(this.app, loaded.data);
+    if (loaded.changed) await this.save(loaded.data);
     return loaded.data;
+  }
+
+  /**
+   * A sidecar changed on disk: created, edited or deleted by something other
+   * than this store — Sync bringing marks made on another device, most often.
+   * The cached copy is dropped and read again, and views repaint. The store's
+   * own writes are recognised and left alone.
+   */
+  async reload(sidecarPath: string): Promise<void> {
+    const target = targetPathFor(sidecarPath);
+    if (target === null) return;
+    const file = this.app.vault.getAbstractFileByPath(sidecarPath);
+    const body = file instanceof TFile ? await this.app.vault.read(file) : null;
+    if (this.written.has(sidecarPath) && this.written.get(sidecarPath) === body) return;
+    this.written.delete(sidecarPath);
+    if (!this.cache.has(target) && body !== null) {
+      // Not loaded here yet: only the review panel's index needs to hear of it.
+      const loaded = await loadSidecar(this.app, target);
+      this.index.replaceFile(target, loaded.annotations);
+      this.emit(target);
+      return;
+    }
+    this.cache.delete(target);
+    if (body === null) {
+      this.index.replaceFile(target, []);
+      this.emit(target);
+      return;
+    }
+    await this.get(target);
+    this.emit(target);
+  }
+
+  private async save(data: AnnotationFile): Promise<void> {
+    // Noted before writing: the vault announces the change before the write returns.
+    const path = sidecarPathFor(data.target);
+    this.written.set(path, data.annotations.length ? JSON.stringify(data, null, 2) : null);
+    this.written.set(path, await saveSidecar(this.app, data));
   }
 
   /**
@@ -196,7 +235,7 @@ export class AnnotationStore {
   }
 
   private async commit(targetPath: string, data: AnnotationFile): Promise<void> {
-    await saveSidecar(this.app, data);
+    await this.save(data);
     this.cache.set(targetPath, data);
     this.index.replaceFile(targetPath, data.annotations);
     this.emit(targetPath);
