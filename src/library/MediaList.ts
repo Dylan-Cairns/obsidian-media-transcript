@@ -3,6 +3,7 @@ import type MediaTranscriptPlugin from '../main';
 import type { IndexEntry, Job, TrashItem } from './client';
 import { durationIn, formatDuration, isDatedName, isGenericName, isTranscriptNamedFor, openingWords, recordedAt, withoutDate } from './mediaInfo';
 import { formatSize } from '../utils/format';
+import { parseSubtitle, type SubtitleSegment } from '../utils/subtitleParser';
 import { obsidianLanguage, t } from '../i18n';
 
 const PAGE = 200;
@@ -61,6 +62,7 @@ export class MediaList {
   private collection: string | null = null;  // null: this vault's own
   private limit = PAGE;
   private error: string | null = null;
+  private retried = false;
   /** Read from each shown transcript once: the media's length and opening words. */
   private details = new Map<string, { duration: number | null; words: string }>();
   /** The row playing inline: its audio, its play button, and the bar under it. */
@@ -88,6 +90,7 @@ export class MediaList {
       this.items = this.build(index);
       this.totalSize = index.reduce((n, e) => n + e.size, 0);
       this.error = null;
+      this.retried = false;
     } catch (e) {
       this.error = (e as Error).message;
     }
@@ -159,6 +162,14 @@ export class MediaList {
     this.stop();  // its row is about to be redrawn
     if (this.error) {
       status.createSpan({ cls: 'mo-lib-error', text: this.error });
+      const retry = status.createEl('button', { cls: 'mo-lib-retry', text: t('library.retry') });
+      const again = () => void this.refresh().then(() => this.host.rerender());
+      retry.addEventListener('click', again);
+      // A phone just woken takes a moment to get its connection (a VPN) back: try once more by itself.
+      if (!this.retried && this.plugin.library.configured) {
+        this.retried = true;
+        window.setTimeout(again, 4000);
+      }
       return;
     }
     const counts = new Map<string, Item[]>();
@@ -341,6 +352,24 @@ export class MediaList {
     const bar = row.createDiv('mo-lib-progress');
     const seek = bar.createEl('input', { type: 'range', attr: { min: '0', max: '1000', value: '0', 'aria-label': t('library.seek') } });
     const time = bar.createSpan({ cls: 'mo-lib-progress-time', text: '0:00' });
+    // The line being said, following the playback; tapping it opens the transcript there.
+    const caption = it.transcript ? createDiv({ cls: 'mo-lib-caption' }) : null;
+    if (caption) row.insertBefore(caption, bar);
+    let segments: SubtitleSegment[] = [];
+    let shown = -1;
+    if (it.transcript && caption) {
+      const file = it.transcript;
+      void this.plugin.app.vault.cachedRead(file).then(text => {
+        segments = parseSubtitle(text, file.extension).filter(s => !/^[[(（【].*[\])）】]$/.test(s.text.trim()));
+        paint();
+      });
+      caption.addEventListener('click', evt => {
+        evt.stopPropagation();
+        const at = audio.currentTime;
+        this.stop();
+        void this.plugin.openTranscript(file, at);
+      });
+    }
     const close = bar.createEl('button', { cls: 'clickable-icon', attr: { 'aria-label': t('library.stop') } });
     setIcon(close, 'x');
     close.addEventListener('click', () => this.stop());
@@ -349,6 +378,13 @@ export class MediaList {
       if (d) seek.value = String(Math.round((audio.currentTime / d) * 1000));
       time.setText(d ? `${formatDuration(audio.currentTime)} / ${formatDuration(d)}` : formatDuration(audio.currentTime));
       seek.style.setProperty('--mo-progress', `${Number(seek.value) / 10}%`);
+      if (caption && segments.length) {
+        const i = lineAt(segments, audio.currentTime);
+        if (i !== shown) {
+          shown = i;
+          caption.setText(i >= 0 ? segments[i].text : '');
+        }
+      }
     };
     seek.addEventListener('input', () => {
       if (Number.isFinite(audio.duration)) audio.currentTime = (Number(seek.value) / 1000) * audio.duration;
@@ -360,6 +396,8 @@ export class MediaList {
     audio.addEventListener('pause', () => { setIcon(button, 'play'); });
     audio.addEventListener('ended', () => this.stop());
     this.playing = { row, audio, button, bar };
+    // It grows by a line or two: keep all of it in sight.
+    window.setTimeout(() => row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
     void audio.play().catch(() => { setIcon(button, 'play'); });
   }
 
@@ -369,6 +407,7 @@ export class MediaList {
     audio.pause();
     audio.removeAttribute('src');
     bar.remove();
+    row.querySelector('.mo-lib-caption')?.remove();
     setIcon(button, 'play');
     row.removeClass('is-playing');
     this.playing = null;
@@ -398,4 +437,19 @@ export class MediaList {
       restore.addEventListener('click', () => { void this.host.restore(item); });
     }
   }
+}
+
+/** The last line that has started by `t` seconds, or -1 before the first. */
+function lineAt(segments: SubtitleSegment[], t: number): number {
+  let lo = 0;
+  let hi = segments.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid].startTime <= t) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
 }

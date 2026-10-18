@@ -1705,3 +1705,37 @@ img.at-flash {
   width: 12px;
   height: 12px;
 }
+
+.mo-lib-caption {
+  flex-basis: 100%;
+  min-height: 1.4em;
+  margin: 2px 0 var(--size-2-2);
+  padding-right: var(--size-4-2);
+  border-left: 2px solid var(--interactive-accent);
+  padding-left: var(--size-4-2);
+  box-sizing: border-box;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  cursor: pointer;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mo-lib-media-row .mo-lib-caption {
+  flex-basis: calc(100% - 30px - var(--size-4-2));
+  margin-left: calc(30px + var(--size-4-2));
+}
+
+.mo-lib-caption:hover {
+  color: var(--text-accent);
+}
+
+.mo-lib button.mo-lib-retry {
+  margin-left: var(--size-4-2);
+  height: 22px;
+  padding: 0 var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+}
