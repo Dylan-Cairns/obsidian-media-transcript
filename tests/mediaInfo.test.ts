@@ -67,6 +67,8 @@ describe('isGenericName', () => {
     expect(isGenericName('Pasted Image 20261009164946_322.png')).toBe(true);
     expect(isGenericName('高买低卖也赚钱！2016-1-10 PM4 24.m4a')).toBe(false);
     expect(isGenericName('周会.m4a')).toBe(false);
+    expect(isGenericName('Recording at 2026-09-13 18.58.30.mp4')).toBe(true);
+    expect(isGenericName('周会 2026-09-13.m4a')).toBe(false);
   });
 });
 

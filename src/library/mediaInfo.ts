@@ -30,7 +30,8 @@ export function isGenericName(name: string): boolean {
   const rest = base
     .replace(/recording|record|audio|voice|memo|video|pasted image|screen recording|录制于|录音|录屏|语音|新录音/gi, '')
     .replace(/[\d\s._:\-年月日时分秒]+/g, '');
-  return rest.length === 0;
+  // A connecting word may be left ("Recording at …").
+  return rest.length === 0 || /^(at|on|of|the|from)$/i.test(rest);
 }
 
 /** 4:05, 1:12:43. */

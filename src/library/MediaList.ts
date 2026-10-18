@@ -20,6 +20,7 @@ function formatWhen(d: Date): string {
   return (dayOnly ? (thisYear ? DAY : DAY_YEAR) : (thisYear ? TIME : TIME_YEAR)).format(d);
 }
 const MEDIA_EXT = /\.(m4a|mp3|wav|aac|flac|ogg|opus|wma|mp4|mov|mkv|webm|avi|m4v)$/i;
+const VIDEO_EXT = /\.(mp4|mov|mkv|webm|avi|m4v)$/i;
 
 /** One media file on the server, with what helps to tell it apart. */
 interface Item {
@@ -33,6 +34,8 @@ interface Item {
   title: string;             // the note it comes from (unless a daily note), or its name
   notes: TFile[];
   transcript: TFile | null;
+  /** A video's audio, the same name as .m4a beside it: what the row plays, a fraction of the size. */
+  listen: string | null;
 }
 
 export interface MediaHost {
@@ -51,6 +54,8 @@ export interface MediaHost {
  */
 export class MediaList {
   private items: Item[] = [];
+  /** All the server holds, audio twins too. */
+  private totalSize = 0;
   private trash: TrashItem[] = [];
   private jobs = new Map<string, Job>();
   private collection: string | null = null;  // null: this vault's own
@@ -81,6 +86,7 @@ export class MediaList {
       this.jobs = new Map();
       for (const j of jobs.jobs.sort((a, b) => a.created - b.created)) this.jobs.set(j.path, j);
       this.items = this.build(index);
+      this.totalSize = index.reduce((n, e) => n + e.size, 0);
       this.error = null;
     } catch (e) {
       this.error = (e as Error).message;
@@ -113,7 +119,16 @@ export class MediaList {
     for (const [source, targets] of Object.entries(resolvedLinks)) for (const target of Object.keys(targets)) note(source, target);
     for (const [source, targets] of Object.entries(unresolvedLinks)) for (const target of Object.keys(targets)) note(source, target);
 
-    return index.filter(e => MEDIA_EXT.test(e.path)).map(e => {
+    // A video's audio twin (same name, .m4a) is listed with the video, not apart.
+    const paths = new Set(index.map(e => e.path));
+    const twinOf = (path: string) => {
+      if (!VIDEO_EXT.test(path)) return null;
+      const audio = path.replace(/\.[^.]+$/, '.m4a');
+      return paths.has(audio) ? audio : null;
+    };
+    const twins = new Set(index.map(e => twinOf(e.path)).filter((p): p is string => p !== null));
+
+    return index.filter(e => MEDIA_EXT.test(e.path) && !twins.has(e.path)).map(e => {
       const collection = e.path.slice(0, e.path.indexOf('/'));
       const name = e.path.slice(e.path.lastIndexOf('/') + 1);
       const base = name.slice(0, name.lastIndexOf('.'));
@@ -135,6 +150,7 @@ export class MediaList {
         title: notes[0] && !isDatedName(notes[0].basename) ? notes[0].basename : isGenericName(name) ? base : withoutDate(base),
         notes,
         transcript,
+        listen: twinOf(e.path),
       };
     });
   }
@@ -147,12 +163,14 @@ export class MediaList {
     }
     const counts = new Map<string, Item[]>();
     for (const it of this.items) counts.set(it.collection, [...(counts.get(it.collection) ?? []), it]);
+    // This vault has nothing of its own on the server (yet): show everything.
+    if (this.collection === null && !counts.has(this.own) && this.items.length) this.collection = '*';
     const current = this.collection ?? this.own;
     const inView = this.collection === '*' ? this.items : counts.get(current) ?? [];
     const size = (items: Item[]) => formatSize(items.reduce((n, i) => n + i.size, 0));
     const waiting = this.plugin.uploader.pending.length;
     status.setText(t(waiting ? 'library.mediaStatusWaiting' : 'library.mediaStatus', {
-      count: inView.length, size: size(inView), total: size(this.items), waiting,
+      count: inView.length, size: size(inView), total: formatSize(this.totalSize), waiting,
     }));
 
     this.renderCollections(list, counts, current);
@@ -195,7 +213,7 @@ export class MediaList {
         this.host.rerender();
       });
     };
-    add(null, t('library.collectionMine'), counts.get(this.own)?.length ?? 0);
+    if (counts.has(this.own)) add(null, t('library.collectionMine'), counts.get(this.own)!.length);
     for (const c of others) add(c, c, counts.get(c)!.length);
     add('*', t('library.collectionAll'), this.items.length);
   }
@@ -318,7 +336,7 @@ export class MediaList {
       return;
     }
     this.stop();
-    const audio = new Audio(this.plugin.library.libraryUrl(it.path));
+    const audio = new Audio(this.plugin.library.libraryUrl(it.listen ?? it.path));
     audio.preload = 'auto';
     const bar = row.createDiv('mo-lib-progress');
     const seek = bar.createEl('input', { type: 'range', attr: { min: '0', max: '1000', value: '0', 'aria-label': t('library.seek') } });
