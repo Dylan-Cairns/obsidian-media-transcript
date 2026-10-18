@@ -84,11 +84,20 @@ export class VideoEmbeds {
 			if (el.dataset.moVideo || !isVideoUrl(url)) return;
 			found.push(el);
 		});
+		// Images first: Auto Embed's frame for the same link is then only hidden.
+		found.sort((a, b) => Number(a.tagName === "IFRAME") - Number(b.tagName === "IFRAME"));
 		for (const el of found) {
 			const url = el.getAttribute("src") ?? "";
 			el.dataset.moVideo = "1";
-			// Auto Embed shows such links in a frame of its own: one player is enough.
-			const target = el.tagName === "IFRAME" ? (el.closest<HTMLElement>(".auto-embed") ?? el) : el;
+			// Auto Embed shows such links in a frame of its own (a block of its own in
+			// Live Preview, beside Obsidian's image): one player is enough.
+			const target = el.tagName === "IFRAME"
+				? (el.closest<HTMLElement>(".auto-embed-container") ?? el.closest<HTMLElement>(".default-fallback-embed-container") ?? el)
+				: el;
+			if (target !== el && this.hasPlayer(root, url)) {
+				target.addClass("mo-video-replaced");
+				continue;
+			}
 			const box = createSpan({ cls: "mo-video" });
 			box.dataset.url = url;
 			box.dataset.note = sourcePath;
@@ -99,6 +108,10 @@ export class VideoEmbeds {
 			if (inEditor || target !== el) target.addClass("mo-video-replaced");
 			else el.remove();
 		}
+	}
+
+	private hasPlayer(root: HTMLElement, url: string): boolean {
+		return Array.from(root.querySelectorAll<HTMLElement>(".mo-video")).some((b) => b.dataset.url === url);
 	}
 
 	private bar(url: string, sourcePath: string): HTMLElement {
