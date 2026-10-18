@@ -245,7 +245,7 @@ export default class AttentionPlugin extends ModulePlugin {
   }
 
   /**
-   * Paint now and again as asynchronously rendered sections become available.
+   * Repaint immediately, then retry as asynchronously rendered sections attach.
    */
   private repaintReadingSoon(): void {
     const provider = (path: string) => this.store.peek(path);
