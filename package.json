@@ -1,6 +1,6 @@
 {
   "name": "obsidian-media-transcript",
-  "version": "2.6.6",
+  "version": "2.7.0",
   "description": "Obsidian plugin Media One: media player with synchronized transcripts, annotations, web image archive and hotlink-protected media",
   "main": "main.js",
   "scripts": {
