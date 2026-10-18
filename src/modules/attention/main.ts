@@ -73,7 +73,6 @@ export default class AttentionPlugin extends ModulePlugin {
     // review panel; nothing repaints itself.
     this.register(this.store.onChange(() => {
       repaintEditors(this.app, path => this.store.peek(path));
-      this.rerenderReadingViews();
       this.repaintReadingSoon();
       this.refreshReviewViews();
     }));
@@ -246,30 +245,13 @@ export default class AttentionPlugin extends ModulePlugin {
   }
 
   /**
-   * Paint the reading views, and again once the re-render above has landed.
-   *
-   * `rerender` returns before the new HTML exists, so painting only once puts
-   * the marks on a DOM that is about to be thrown away — and a block Obsidian
-   * decides it can reuse never runs the post-processor that would have painted
-   * it. Marking then looked like nothing had happened until the note was
-   * closed and opened again. Painting is idempotent, so trying a few times
-   * costs nothing and covers however long the render takes.
+   * Paint now and again as asynchronously rendered sections become available.
    */
   private repaintReadingSoon(): void {
     const provider = (path: string) => this.store.peek(path);
     repaintReadingViews(this.app, provider);
     for (const delay of [0, 60, 200]) {
       window.setTimeout(() => repaintReadingViews(this.app, provider), delay);
-    }
-  }
-
-  /** Reading mode caches its HTML, so post-processors only re-run on request. */
-  private rerenderReadingViews(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      const view = leaf.view;
-      if (view instanceof MarkdownView && view.getMode() === 'preview') {
-        view.previewMode.rerender(true);
-      }
     }
   }
 

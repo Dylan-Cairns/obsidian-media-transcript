@@ -87,6 +87,7 @@ function textNodesIn(root: HTMLElement): Text[] {
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n as Text;
     if (text.data.length === 0) continue;
+    if (text.parentElement?.closest('[data-at-source]') !== root.closest('[data-at-source]')) continue;
     if (isInsideHighlight(text) || isChrome(text)) continue;
     out.push(text);
   }

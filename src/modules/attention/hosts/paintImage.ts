@@ -3,6 +3,20 @@ import { imageTargetOf, imageMatches, srcHint } from '../anchor/imageAnchor';
 import { asEl, asImg } from '../dom';
 import { t } from '../../../i18n';
 
+const originalTitles = new WeakMap<HTMLImageElement, string | null>();
+
+/** Remove our image decoration without changing the image itself. */
+export function clearImageMark(img: HTMLImageElement): void {
+  if (originalTitles.has(img)) {
+    const title = originalTitles.get(img)!;
+    if (title === null) img.removeAttribute('title');
+    else img.setAttribute('title', title);
+    originalTitles.delete(img);
+  }
+  img.classList.remove('at-img', 'at-img-comment');
+  delete img.dataset.atId;
+}
+
 /**
  * Outline the pictures that have been marked.
  *
@@ -26,6 +40,7 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
   for (const raw of Array.from(root.querySelectorAll('img'))) {
     const img = asImg(raw);
     if (!img) continue;
+    if (img.closest('[data-at-source]') !== root.closest('[data-at-source]')) continue;
     const src = img.getAttribute('src') ?? '';
     const hint = srcHint(src);
     // Either the embed points at this picture, or this is the picture we saw
@@ -34,6 +49,7 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
     const hit = targets.find(t => imageMatches(src, t.target) || (t.hint && t.hint === hint));
     if (!hit) continue;
 
+    if (!originalTitles.has(img)) originalTitles.set(img, img.getAttribute('title'));
     img.addClass('at-img');
     img.toggleClass('at-img-comment', isComment(hit.annotation));
     img.dataset.atId = hit.annotation.id;

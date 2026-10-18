@@ -3,9 +3,8 @@ import { Annotation } from '../../model';
 import { Provider } from './decorations';
 import { paintQuote } from '../paintQuote';
 import { strip } from '../../anchor/plainText';
-import { paintImages } from '../paintImage';
-import { transcludedNotes } from '../../store/transclusions';
-import { asEl } from '../../dom';
+import { clearImageMark, paintImages } from '../paintImage';
+import { asEl, asImg } from '../../dom';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { Range, intersect, lineStarts, rangeOfLines } from '../../anchor/lines';
 
@@ -34,16 +33,16 @@ import { Range, intersect, lineStarts, rangeOfLines } from '../../anchor/lines';
  */
 
 const LINES = 'atLines';
+const sections = new WeakMap<HTMLElement, { source: string; signature: string }>();
 
 export function readingModeHighlighter(provider: Provider) {
   return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
     const info = ctx.getSectionInfo(el);
     if (info) el.dataset[LINES] = `${info.lineStart},${info.lineEnd}`;
-
-    const annotations = provider(ctx.sourcePath);
-    if (annotations.length === 0) return;
-    paintImages(el, annotations);
-    if (info) paintBlock(el, info.text, annotations);
+    // Record empty and embedded sections too: their annotations may load later.
+    el.dataset.atSource = ctx.sourcePath;
+    sections.set(el, { source: info?.text ?? '', signature: '' });
+    paintSection(el, readingMarks(info?.text ?? '', provider(ctx.sourcePath)));
   };
 }
 
@@ -64,44 +63,45 @@ export function repaintReadingViews(app: App, provider: Provider): void {
     const container = asEl(view.previewMode.containerEl.querySelector(':scope > .markdown-preview-view'));
     if (!container) continue;
 
-    const source = view.data;
-    const annotations = provider(view.file.path);
-    if (annotations.length > 0) {
-      paintImages(container, annotations);
-      // Resolve once for the whole view, not once per block: resolving searches
-      // the note, and a long note has many blocks. Fifty blocks and ten marks
-      // was five hundred searches for one repaint, and repaints happen on
-      // every scroll.
-      const placed = place(source, annotations);
-      const starts = lineStarts(source);
-      for (const block of blocksOf(container)) paintPlaced(block, source, starts, placed);
-    }
-
-    // Marks belonging to notes transcluded into this one, painted inside the
-    // transclusion they came from. The host's line numbers say nothing about
-    // the embedded file, so those are still matched by their words — within
-    // the embed, which is a small enough window for that to be safe.
-    for (const note of transcludedNotes(app, view.file)) {
-      const theirs = provider(note.path);
-      if (theirs.length === 0) continue;
-      for (const raw of Array.from(container.querySelectorAll('.internal-embed, .markdown-embed'))) {
-        const box = asEl(raw);
-        if (!box) continue;
-        paintImages(box, theirs);
-        for (const a of theirs) {
-          if (a.anchor.kind !== 'markdown') continue;
-          paintQuote(box, a, strip(a.anchor.quote));
-        }
+    // Resolve each file once per view. Embedded sections retain their own source.
+    const files = new Map<string, ReturnType<typeof readingMarks>>();
+    for (const el of Array.from(container.querySelectorAll<HTMLElement>('[data-at-source]'))) {
+      const section = sections.get(el);
+      if (!section) continue;
+      const path = el.dataset.atSource!;
+      let marks = files.get(path);
+      if (!marks) {
+        marks = readingMarks(path === view.file.path ? view.data : section.source, provider(path));
+        files.set(path, marks);
       }
+      paintSection(el, marks);
     }
   }
 }
 
-/** Every rendered block that knows where it came from. */
-function blocksOf(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll(`[data-${dashed(LINES)}]`))
-    .map(asEl)
-    .filter((el): el is HTMLElement => el !== null);
+/** Only drawing inputs matter; review history does not change the marks. */
+function readingMarks(source: string, annotations: readonly Annotation[]) {
+  return {
+    source, annotations, starts: annotations.length ? lineStarts(source) : [], placed: place(source, annotations),
+    signature: JSON.stringify(annotations.map(a => [a.id, a.anchor, a.body])),
+  };
+}
+
+/** Clear stale marks, preserving selection during unchanged scroll repaints. */
+function paintSection(el: HTMLElement, marks: ReturnType<typeof readingMarks>): void {
+  const section = sections.get(el)!;
+  if (section.signature !== marks.signature || section.source !== marks.source) {
+    for (const mark of Array.from(el.querySelectorAll<HTMLElement>('.at-hl[data-at-id], img.at-img[data-at-id]'))) {
+      if (mark.closest('[data-at-source]') !== el) continue;
+      const image = asImg(mark);
+      if (image) clearImageMark(image);
+      else mark.replaceWith(...Array.from(mark.childNodes));
+    }
+    section.signature = marks.signature;
+    section.source = marks.source;
+  }
+  paintImages(el, marks.annotations);
+  paintPlaced(el, marks.source, marks.starts, marks.placed);
 }
 
 interface Placed {
@@ -141,14 +141,4 @@ function paintPlaced(
     if (!piece) continue;
     paintQuote(el, annotation, strip(source.slice(piece.from, piece.to)));
   }
-}
-
-/** One block, from the post-processor, where there is nothing yet to reuse. */
-function paintBlock(el: HTMLElement, source: string, annotations: readonly Annotation[]): void {
-  paintPlaced(el, source, lineStarts(source), place(source, annotations));
-}
-
-/** `atLines` → `at-lines`, for the attribute selector. */
-function dashed(name: string): string {
-  return name.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
 }
